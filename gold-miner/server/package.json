@@ -1,0 +1,14 @@
+{
+  "name": "goldminer-leaderboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "黄金矿工在线排行榜服务端 (Node 22 + SQLite)",
+  "main": "src/server.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
+    "admin": "node admin.js"
+  },
+  "dependencies": { "better-sqlite3": "^13.0.3" }
+}

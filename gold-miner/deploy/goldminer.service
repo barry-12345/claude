@@ -1,0 +1,25 @@
+[Unit]
+Description=Gold Miner leaderboard server (黄金矿工排行榜)
+After=network.target
+
+[Service]
+Type=simple
+User=goldminer
+Group=goldminer
+WorkingDirectory=/opt/goldminer/server
+EnvironmentFile=/etc/goldminer.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/goldminer/server/src/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/goldminer /var/backups/goldminer
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

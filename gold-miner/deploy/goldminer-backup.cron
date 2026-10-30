@@ -1,0 +1,8 @@
+# 黄金矿工排行榜:每天 03:17 在线备份(保留 30 天)。由 deploy.sh 安装到 /etc/cron.d/goldminer-backup
+# 如需异地上传,取消下面一行注释并改成你的命令({file} 会被替换为备份文件路径),详见 DEPLOY.md 第 9 节:
+# OFFSITE_CMD=coscli cp {file} cos://你的桶名/goldminer/
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+DB_PATH=/var/lib/goldminer/scores.db
+BACKUP_DIR=/var/backups/goldminer
+17 3 * * * goldminer /usr/bin/node /opt/goldminer/server/scripts/backup.js >> /var/log/goldminer-backup.log 2>&1
