@@ -72,6 +72,32 @@ note() { echo "    $*"; }
 
 [ "$DRY" = 1 ] && echo "*** 试运行模式(--dry-run):只显示步骤,不会修改系统 ***"
 
+# ---------- 0. 共存检查 ----------
+# 本脚本会安装 nginx、申请证书、启用 ufw:80/443 已经被 nginx 以外的程序(例如 Caddy)占用的服务器上,
+# 这会和现有站点冲突,所以在做任何修改之前就退出,改用 deploy-online.sh(共存模式)。
+web_port_conflicts() {
+  local p owners
+  for p in 80 443; do
+    ss -Hltn 2>/dev/null | awk -v p="$p" '{ n = split($4, a, ":"); if (a[n] == p) f = 1 } END { exit !f }' || continue
+    owners="$(ss -Hltnp 2>/dev/null | awk -v p="$p" '{ n = split($4, a, ":"); if (a[n] == p) print }' | grep -o 'users:(("[^"]*"' | sed 's/^users:(("//; s/"$//' | sort -u | tr '\n' ' ')"
+    owners="${owners% }"
+    if [ -z "$owners" ]; then
+      [ "$(id -u)" = 0 ] && echo "$p 端口(未知程序)"         # without root, ss cannot name the owner: the root check below stops anyway
+    elif [ "$owners" != "nginx" ]; then
+      echo "$p 端口($owners)"
+    fi
+  done
+}
+CONFLICT="$(web_port_conflicts | tr '\n' ' ')"
+if [ "$DRY" = 1 ]; then
+  echo "  [dry-run] 检查 80/443 是否被 nginx 以外的程序占用: ${CONFLICT:-没有}${CONFLICT:+(正式运行会在这里退出,请改用 deploy-online.sh)}"
+elif [ -n "$CONFLICT" ]; then
+  echo "错误: 本机的 ${CONFLICT% }已被 nginx 以外的程序占用(例如 Caddy)。" >&2
+  echo "      本脚本会安装 nginx 并接管 80/443,会和现有站点冲突,所以没有做任何修改就退出了。" >&2
+  echo "      请使用 deploy-online.sh(共存模式),见 deploy/DEPLOY-online.md。" >&2
+  exit 1
+fi
+
 # ---------- 1. 检查系统 ----------
 step 1 "检查系统(Ubuntu 22.04/24.04)和 root 权限"
 if [ "$DRY" = 1 ]; then

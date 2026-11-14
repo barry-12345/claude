@@ -160,10 +160,10 @@ function createServer(config = {}, deps = {}) {
     if (refuse) { srv.send(c, refuse); srv.closeConn(c, 1008, refuse.code); return; }
     ws.on('message', (data, isBinary) => {
       const text = isBinary ? null : data.toString();
-      if (c.inLine) c.inLine.push(() => onMessage(c, text)); else onMessage(c, text);
+      if (c.inLine) { const info = {}; Object.assign(info, c.inLine.push(() => onMessage(c, text, info))); } else onMessage(c, text);
     });
   }
-  function onMessage(c, text) {
+  function onMessage(c, text, sim) {
     if (c.closed) return;
     const now = clock.now();
     c.lastMsg = now;
@@ -180,7 +180,7 @@ function createServer(config = {}, deps = {}) {
     }
     const m = r.msg;
     if (m.t === 'ping') { srv.send(c, { t: 'pong', c: m.c, k: c.room ? Math.round(c.room.serverTick() * 1000) / 1000 : 0 }); return; }
-    if (m.t === 'in') { if (c.room) c.room.push(c, m); return; }
+    if (m.t === 'in') { if (sim && cfg.testHooks) m.sim = sim; if (c.room) c.room.push(c, m); return; }
     if (c.room) return;                                         // already seated: a second create / join / resume is ignored
     if (m.proto !== P.PROTO || m.build !== build) { srv.send(c, { t: 'error', code: 'version' }); srv.closeConn(c, 1000, 'version'); return; }
     if (m.t === 'create') {

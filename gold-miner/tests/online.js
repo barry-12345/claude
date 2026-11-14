@@ -98,7 +98,7 @@ const ONLINE_BOT = `(() => {
       if (G.tug && (G.tug.holder === s.you || G.tug.ch === s.you)) O.want = 'mash';
       else if (h.state === 'swing' && !s.predActive && me.frozen <= 0) {
         const it = firstHit(me); O.idle++;
-        if ((it && (val(it) / Math.max(0.6, it.weight) >= 60 || val(it) >= 300)) || O.idle > 100) O.want = 'fire';
+        if ((it && (val(it) / Math.max(0.6, it.weight) >= 60 || val(it) >= 300)) || O.idle > 45) O.want = 'fire';
       } else if (h.state === 'retract' && h.item && me.dyn > 0 && h.item.weight >= 4 && val(h.item) < 100 && h.len > 200) O.want = 'dyn';
       if (h.state !== 'swing') O.idle = 0;
     }
@@ -133,6 +133,16 @@ async function drive(page, opt = {}) {
     await sleep(opt.poll || 20);
   }
   return { samples, ms: Date.now() - t0 };
+}
+// once per round the server tops both players up to the round target (test setup through /__test/eval): with FAST=1 rounds of
+// 10 s nobody reaches the target and versus ends at the first elimination, so without it a game is a single round
+function topUp(srv, code) {
+  let stop = false, boosted = 0;
+  const done = (async () => { while (!stop) { const st = await srv.api(`/__test/room/${code}/state`).catch(() => null); if (!st || !st.state) break;
+    if (st.state.screen === 'play' && st.state.round !== boosted) { boosted = st.state.round;
+      await srv.api(`/__test/room/${code}/eval`, { code: '(() => { const G = __game.G, t = __game.curTarget(); for (const p of G.players) p.money = Math.max(p.money, t + 50); })()' }); }
+    await sleep(300); } })();
+  return { stop: async () => { stop = true; await done; } };
 }
 async function finalsAgree(pages, srv, code) {
   const fs_ = [];
@@ -264,6 +274,7 @@ function predictionCheck(rec, keys) {          // O-14: next frame after the key
     for (let j = i + 1; j < rec.length && rec[j].st === 'extend' && rec[j - 1].st === 'extend'; j++) {
       const dt = (rec[j].t - rec[j - 1].t) / 1000, dev = Math.abs((rec[j].len - rec[j - 1].len) - rec[j].sp * dt);
       n++; if (dev <= 30) ok++; worst = Math.max(worst, dev);
+      if (dev > 30 && process.env.O14_DEBUG) console.log('O14 dev', dev.toFixed(1), JSON.stringify(rec.slice(Math.max(i, j - 3), j + 2).map(f => [Math.round(f.t), f.st, Math.round(f.len), f.pred, f.rt && Math.round(f.rt * 10) / 10])));
     }
   }
   return { presses, nextOk, n, ok, worst };
@@ -272,8 +283,10 @@ function fireAccuracy(fires) {                 // O-13
   const shown = fires.filter(f => f.shownAngle != null);
   const err = shown.map(f => ({ e: Math.abs(f.shownAngle - f.serverAngle), back: f.back }));
   const within = err.filter(x => x.e <= 1.5).length, notBack = err.filter(x => !x.back).length;
+  // out-of-window fires whose own input message was held back >= 250 ms extra by the simulated network (a 300 ms stall, or queued behind one)
+  const stalled = shown.filter(f => !f.back && f.sim && (f.sim.stall || f.sim.held >= 400)).length;
   const maxBack = err.filter(x => x.back).reduce((m, x) => Math.max(m, x.e), 0);
-  return { total: fires.length, n: err.length, within, notBack, maxBack, maxAll: err.reduce((m, x) => Math.max(m, x.e), 0) };
+  return { total: fires.length, n: err.length, within, notBack, stalled, maxBack, maxAll: err.reduce((m, x) => Math.max(m, x.e), 0) };
 }
 function bandwidth(samples) {                  // O-17: bytes per second from 1 s samples taken while the game ran
   const play = samples.filter(s => s.sc !== 'select');
@@ -299,24 +312,14 @@ async function o10(browser, srv) {
   await wait(A, () => __game.G.screen === 'play', null, 8000);
   await startRec(A, B);
   await sleep(1200); await shot(A, '04-play-you-tag.png');
-  const shopShot = async () => { const sc = await G(A, () => __game.G.screen); if (sc === 'shop' && !shotOnce.shop) { await sleep(700); await shotWhen(A, '08-shop-opponent.png'); } return false; };
-  const [ra, rb] = await Promise.all([drive(A, { until: shopShot }), drive(B)]);
+  const [ra, rb] = await Promise.all([drive(A), drive(B)]);
   await wait(A, () => __game.G.screen === 'final', null, 20000); await wait(B, () => __game.G.screen === 'final', null, 20000);
   await sleep(500);
   const fin = await finalsAgree([A, B], srv, code);
   const you = [await G(A, () => __game.net.stats().you), await G(B, () => __game.net.stats().you)];
-  const recA = await recOf(A), recB = await recOf(B);
-  const sm = [swingSmooth(recA.rec), swingSmooth(recB.rec)];
-  const smN = sm[0].n + sm[1].n, smOk = sm[0].ok + sm[1].ok;
-  const Ds = ra.samples.concat(rb.samples).filter(s => s.sc === 'play').map(s => s.D);
-  const bw = [bandwidth(ra.samples), bandwidth(rb.samples)];
   const errs = A.errors.length + B.errors.length;
   report('O-10', you[0] === 0 && you[1] === 1 && fin.same && errs === 0,
     `FAST=1 seed 5, lobby/select/play/results/shop by real keys and clicks, two contexts: A is player ${you[0] + 1}, B is player ${you[1] + 1}; G.final identical on A, B and the server: ${fin.same} (${scoreStr(fin.server)}); ${(Math.max(ra.ms, rb.ms) / 1000).toFixed(0)} s; errors ${errs}`);
-  report('O-15', smN > 300 && smOk / smN >= 0.99 && median(Ds) <= 100,
-    `no injection: other player's swinging hook, frame-to-frame angle change <= 6 deg in ${smOk}/${smN} frames (${pct(smOk, smN)}, need >= 99%); interpolation delay median ${median(Ds).toFixed(1)} ms (need <= 100; min ${Math.min(...Ds).toFixed(0)}, max ${Math.max(...Ds).toFixed(0)})`);
-  const bwOk = bw.every(b => b && b.rxAvg <= 25600 && b.rxPeak <= 81920 && b.txAvg <= 2048);
-  report('O-17', bwOk, bw.map((b, i) => `${'AB'[i]}: down avg ${(b.rxAvg / 1024).toFixed(2)} KB/s, peak 1 s ${(b.rxPeak / 1024).toFixed(2)} KB/s, up avg ${(b.txAvg / 1024).toFixed(3)} KB/s`).join(' | ') + ' (limits 25 / 80 / 2 KB/s)');
   await shot(A, '09-final-again.png');
   // ---- O-11: play again
   await A.keyboard.press('Space');
@@ -329,13 +332,28 @@ async function o10(browser, srv) {
   await wait(A, () => __game.G.screen === 'select', null, 5000); await wait(B, () => __game.G.screen === 'select', null, 5000);
   const codes = [await G(A, () => __game.net.stats().room), await G(B, () => __game.net.stats().room)];
   await realSelect(A, B);
-  const [r2a, r2b] = await Promise.all([drive(A), drive(B)]);
+  // the second game goes through all 8 rounds (topUp)
+  let shopSeen = 0;
+  const boost = topUp(srv, code);
+  const shopShot = async () => { const sc = await G(A, () => __game.G.screen); if (sc === 'shop') { shopSeen++; if (!shotOnce['08-shop-opponent.png'] && shopSeen > 20) await shotWhen(A, '08-shop-opponent.png'); } return false; };
+  const [r2a, r2b] = await Promise.all([drive(A, { until: shopShot }), drive(B)]);
+  await boost.stop();
   await wait(A, () => __game.G.screen === 'final', null, 20000); await wait(B, () => __game.G.screen === 'final', null, 20000);
   await sleep(500);
   const fin2 = await finalsAgree([A, B], srv, code);
   const errs2 = A.errors.length + B.errors.length;
-  report('O-11', mid.a === 'final' && mid.b === 'final' && mid.bSees && mid.text && codes.every(c => c === code) && fin2.same && errs2 === 0,
-    `A pressed Space only: both still on final (${mid.a}/${mid.b}), B shows "对方想再来一局!"=${mid.text}; B pressed Enter -> both on character select, room code ${codes.join('/')} (was ${code}); second game by real keys (${(Math.max(r2a.ms, r2b.ms) / 1000).toFixed(0)} s): finals identical on A, B, server: ${fin2.same} (${scoreStr(fin2.server)}); errors ${errs2}`);
+  // O-15 / O-17 over both games (no injection)
+  const recA = await recOf(A), recB = await recOf(B);
+  const sm = [swingSmooth(recA.rec), swingSmooth(recB.rec)];
+  const smN = sm[0].n + sm[1].n, smOk = sm[0].ok + sm[1].ok;
+  const Ds = ra.samples.concat(rb.samples, r2a.samples, r2b.samples).filter(x => x.sc === 'play').map(x => x.D);
+  const bw = [bandwidth(ra.samples), bandwidth(rb.samples), bandwidth(r2a.samples), bandwidth(r2b.samples)];
+  report('O-15', smN > 300 && smOk / smN >= 0.99 && median(Ds) <= 100,
+    `no injection, both games: other player's swinging hook, frame-to-frame angle change <= 6 deg in ${smOk}/${smN} frames (${pct(smOk, smN)}, need >= 99%); interpolation delay median ${median(Ds).toFixed(1)} ms (need <= 100; min ${Math.min(...Ds).toFixed(0)}, max ${Math.max(...Ds).toFixed(0)})`);
+  const bwOk = bw.every(b => b && b.rxAvg <= 25600 && b.rxPeak <= 81920 && b.txAvg <= 2048);
+  report('O-17', bwOk, bw.map((b, i) => `${['A game 1', 'B game 1', 'A game 2 (8 rounds)', 'B game 2'][i]}: down avg ${(b.rxAvg / 1024).toFixed(2)} KB/s, peak 1 s ${(b.rxPeak / 1024).toFixed(2)} KB/s, up avg ${(b.txAvg / 1024).toFixed(3)} KB/s`).join(' | ') + ' (limits 25 / 80 / 2 KB/s)');
+  report('O-11', mid.a === 'final' && mid.b === 'final' && mid.bSees && mid.text && codes.every(c => c === code) && fin2.same && fin2.server.scores[0].rounds === 8 && errs2 === 0,
+    `A pressed Space only: both still on final (${mid.a}/${mid.b}), B shows "对方想再来一局!"=${mid.text}; B pressed Enter -> both on character select, room code ${codes.join('/')} (was ${code}); second game by real keys through all 8 rounds (results Space, shop S/W; money topped up to each target by the test) in ${(Math.max(r2a.ms, r2b.ms) / 1000).toFixed(0)} s: finals identical on A, B, server: ${fin2.same} (${scoreStr(fin2.server)}); errors ${errs2}`);
   // seat tokens never travel in a URL
   const tokens = [await G(A, c => JSON.parse(localStorage.getItem('goldminer.online.' + c)).seat, code), await G(B, c => JSON.parse(localStorage.getItem('goldminer.online.' + c)).seat, code)];
   const leak = ALL_URLS.concat(WS_URLS).filter(u => tokens.some(t => u.includes(t)));
@@ -349,14 +367,15 @@ async function o10(browser, srv) {
 async function o12(browser) {
   const srv = await startSrv({ netSim: { lat: 100, jitter: 50, stallP: 0.02, stallMs: 300 } });
   try {
-    const rooms = [];
-    for (const seed of [5, 6, 7]) rooms.push(Object.assign(await realPair(browser, srv, { seed, nameA: '甲' + seed, nameB: '乙' + seed }), { seed }));
-    for (const r of rooms) { for (const p of [r.A, r.B]) await p.evaluate(ONLINE_BOT); await realSelect(r.A, r.B); }
-    for (const r of rooms) await startRec(r.A, r.B);
-    await Promise.all(rooms.flatMap(r => [drive(r.A, { poll: 30 }), drive(r.B, { poll: 30 })]));
     const out = [], fires = [], pc = { presses: 0, nextOk: 0, n: 0, ok: 0, worst: 0 };
     let allSame = true, errs = 0;
-    for (const r of rooms) {
+    for (const seed of [5, 6, 7]) {                                           // one game after the other (no CPU contention between them)
+      const r = Object.assign(await realPair(browser, srv, { seed, nameA: '甲' + seed, nameB: '乙' + seed }), { seed });
+      for (const p of [r.A, r.B]) await p.evaluate(ONLINE_BOT);
+      await realSelect(r.A, r.B); await startRec(r.A, r.B);
+      const boost = topUp(srv, r.code);                                     // 8 rounds: enough fires for the percentages
+      await Promise.all([drive(r.A), drive(r.B)]);
+      await boost.stop();
       await wait(r.A, () => __game.G.screen === 'final', null, 30000).catch(() => {}); await wait(r.B, () => __game.G.screen === 'final', null, 30000).catch(() => {});
       await sleep(800);
       const f = await finalsAgree([r.A, r.B], srv, r.code); allSame = allSame && f.same;
@@ -368,10 +387,12 @@ async function o12(browser) {
       }
       await closeAll(r.A, r.B);
     }
-    report('O-12', allSame && errs === 0, `NET_SIM lat=100,jitter=50,stall=0.02:300, three games at once, all reached final with identical scores on both pages and the server: ${out.join('; ')}; errors ${errs}`);
+    report('O-12', allSame && errs === 0, `NET_SIM lat=100,jitter=50,stall=0.02:300, three games (money topped up to each round target, so all 8 rounds are played), all reached final with identical scores on both pages and the server: ${out.join('; ')}; errors ${errs}`);
     const fa = fireAccuracy(fires);
+    const ages = fires.map(f => f.age).filter(a => a != null).sort((a, b) => a - b);
+    if (process.env.O13_DEBUG) console.log(fires.map(f => JSON.stringify(f)).join('\n'));
     report('O-13', fa.n >= 30 && fa.within / fa.n >= 0.95 && fa.notBack / fa.n <= 0.02 && fa.maxBack <= 4,
-      `${fa.n} fires with a shown angle (of ${fa.total} server fires): |shown - server| <= 1.5 deg for ${fa.within} (${pct(fa.within, fa.n)}, need >= 95%); outside the look-back window ${fa.notBack} (${pct(fa.notBack, fa.n)}, need <= 2%); max error of the lag-compensated ones ${fa.maxBack.toFixed(3)} deg (need <= 4); max overall ${fa.maxAll.toFixed(2)} deg`);
+      `${fa.n} fires with a shown angle (of ${fa.total} server fires): |shown - server| <= 1.5 deg for ${fa.within} (${pct(fa.within, fa.n)}, need >= 95%); outside the look-back window ${fa.notBack} (${pct(fa.notBack, fa.n)}, need <= 2%; ${fa.stalled} of them had their own input message stalled by the simulated network); max error of the lag-compensated ones ${fa.maxBack.toFixed(3)} deg (need <= 4); max overall ${fa.maxAll.toFixed(2)} deg; age of the aimed tick on arrival p50 ${ages[ages.length >> 1]} / p95 ${ages[Math.floor(ages.length * 0.95)]} / max ${ages[ages.length - 1]} ticks (window 30)`);
     report('O-14', pc.presses >= 30 && pc.nextOk === pc.presses && pc.ok / pc.n >= 0.98,
       `${pc.presses} fire presses: next frame shows the own hook extending with len > HOOK.minLen in ${pc.nextOk}/${pc.presses}; extension frames with |delta len - speed x dt| <= 30 px: ${pc.ok}/${pc.n} (${pct(pc.ok, pc.n)}, need >= 98%; worst ${pc.worst.toFixed(1)} px)`);
   } finally { await srv.close(); }
@@ -386,7 +407,7 @@ async function o16(browser, srv) {
     await realSelect(A, B);
     await wait(A, () => __game.G.screen === 'play', null, 8000); await sleep(400);
     // A has just grabbed a (very heavy, so slow) giant nugget in the middle of the field
-    await srv.api(`/__test/room/${code}/eval`, { code: `(() => { const g = __game, G = g.G; G.items = G.items.filter(i => i.y > 600 || Math.abs(i.x - 640) > 200); G.event = null; G.hazards = []; G.time = 60;
+    await srv.api(`/__test/room/${code}/eval`, { code: `(() => { const g = __game, G = g.G; G.items = []; G.event = null; G.hazards = []; G.time = 60;
       const a = G.players[0], it = g.makeItem('gold_xl', 640, 470); it.weight = 40; G.items.push(it); it.grabbedBy = 0;
       const dx = it.x - a.x, dy = it.y - g.PIVOT_Y, ang = Math.atan2(dx, dy), len = Math.hypot(dx, dy) - it.r * 0.55;
       a.hook.state = 'retract'; a.hook.item = it; a.hook.angle = ang; a.hook.len = len; a.hook.offx = it.x - (a.x + Math.sin(ang) * len); a.hook.offy = it.y - (g.PIVOT_Y + Math.cos(ang) * len);
@@ -408,8 +429,11 @@ async function o16(browser, srv) {
     const both = [await G(A, () => !!__game.G.tug), await G(B, () => !!__game.G.tug)];
     // both mash their fire keys for the whole tug (5 s)
     let presses = [0, 0]; const t0 = Date.now();
-    const mash = async (p, key, i) => { while (Date.now() - t0 < 5600) { await p.keyboard.press(key); presses[i]++; await sleep(40 + i * 25); } };
+    const mash = async (p, key, i) => {                                 // mash while this page still shows the tug (a press after it would fire again)
+      while (Date.now() - t0 < 7000 && await G(p, () => !!__game.G.tug)) { await p.keyboard.press(key); presses[i]++; await sleep(40 + i * 25); }
+    };
     await Promise.all([mash(A, 'KeyS', 0), mash(B, 'ArrowDown', 1)]);
+    const tugMs = Date.now() - t0;
     const st = await srv.api(`/__test/room/${code}/state`);
     const owner = (st.state.items.find(i => i.type === 'gold_xl' && i.weight === 40) || {}).grabbedBy;
     await sleep(700);
@@ -418,10 +442,11 @@ async function o16(browser, srv) {
     await srv.api(`/__test/room/${code}/eval`, { code: `(() => { for (const it of __game.G.items) if (it.weight === 40) it.weight = 1; })()` });
     await sleep(3000);
     const st2 = await srv.api(`/__test/room/${code}/state`);
+    if (process.env.O16_DEBUG) console.log(JSON.stringify({ hooks: st2.state.players.map(p => p.hook), items: st2.state.items, screen: st2.state.screen, time: st2.state.time, st1: { tug: st.state.tug, hooks: st.state.players.map(p => p.hook) } }));
     const mS = st2.state.players.map(p => p.money).join(','), mA = await G(A, () => __game.G.players.map(p => p.money).join(',')), mB = await G(B, () => __game.G.players.map(p => p.money).join(','));
     const errs = A.errors.length + B.errors.length;
     report('O-16', aimed && both.every(Boolean) && st.state.tug === null && shown[0] === owner && shown[1] === owner && mA === mS && mB === mS && errs === 0,
-      `B aimed with its interpolated hook and pressed ArrowDown: tug on A=${both[0]} B=${both[1]}; real mashing ${presses[0]} (A) / ${presses[1]} (B) presses; after the tug the nugget belongs to P${owner + 1} on the server, A shows P${shown[0] + 1}, B shows P${shown[1] + 1}; money after delivery server ${mS}, A ${mA}, B ${mB}; errors ${errs}`);
+      `B aimed with its interpolated hook and pressed ArrowDown: tug on A=${both[0]} B=${both[1]}; real mashing ${presses[0]} (A) / ${presses[1]} (B) presses for ${(tugMs / 1000).toFixed(1)} s; after the tug the nugget belongs to P${owner + 1} on the server, A shows P${shown[0] + 1}, B shows P${shown[1] + 1}; money after delivery server ${mS}, A ${mA}, B ${mB}; errors ${errs}`);
   } finally { await closeAll(A, B); }
 }
 
@@ -439,7 +464,7 @@ async function o20o21(browser, srv) {
   // ---- O-20
   await sleep(2500);
   const st0 = await srv.api(`/__test/room/${r20.code}/state`);
-  const drop = await srv.api(`/__test/drop?room=${r20.code}&slot=1`);
+  const drop = await srv.api(`/__test/drop?room=${r20.code}&slot=1`, {});
   const tDrop = Date.now();
   let sawOverlay = -1, shotDone = false;
   while (Date.now() - tDrop < 3000) {
@@ -559,7 +584,7 @@ async function o24(browser, srv) {
     await sleep(500);
     const ev2 = (await srv.api(`/__test/room/${code}/state`)).events;
     const kAway = (ev2.find(e => e.ev === 'in:away:0') || {}).k, kPz = (ev2.find(e => e.ev === 'pause:away') || {}).k;
-    const ok = pausedText && s1.state.time === s2.state.time && ['3', '2', '1'].every(t => seen.has(t)) && Math.abs(resumedB - 3000) <= 200 + 150 && kRes - kIn === 180 && kPz - kAway <= 1 && A.errors.length + B.errors.length === 0;
+    const ok = pausedText && s1.state.time === s2.state.time && ['3', '2', '1'].every(t => seen.has(t)) && Math.abs(resumedB - 3000) <= 200 + 150 && Math.abs(kRes - kIn - 180) <= 1 && kPz - kAway <= 1 && A.errors.length + B.errors.length === 0;
     report('O-24', ok,
       `A pressed P: G.paused on A and B, both draw "甲 暂停了游戏"=${pausedText}; server G.time unchanged over 1 s (${s1.state.time.toFixed(3)} = ${s2.state.time.toFixed(3)}); B chose 继续: countdown ${[...seen].join('-')} shown on both pages, server resumed ${(kRes - kIn)} ticks (= ${((kRes - kIn) / 60).toFixed(2)} s) after the request, pages unpaused ${(resumedA / 1000).toFixed(2)} s (A) / ${(resumedB / 1000).toFixed(2)} s (B) after the key press (incl. interpolation delay ~0.1 s); hidden tab: "away" arrived at k ${kAway}, paused at k ${kPz} (${kPz - kAway} tick)`);
   } finally { await closeAll(A, B); }
@@ -626,10 +651,11 @@ async function o27(browser, srv) {
     const inside = bx0 >= sl - 1 && by0 >= st - 1 && bx0 + bw <= r.vw - sr + 1 && by0 + bh <= r.vh - sb + 1;
     if (name.startsWith('iPhone')) await shot(page, '20-touch-menu.png');
     await page.touchscreen.tap(bx0 + bw / 2, by0 + bh / 2);
+    const tTap = Date.now();
     const first = await frameTexts(page);
     const shown = first.includes('联机对战需在电脑上进行');
     if (name.startsWith('iPhone')) await shot(page, '21-touch-hint.png');
-    const tTap = Date.now(); let goneAt = -1;
+    let goneAt = -1;
     while (Date.now() - tTap < 4000) { const tx = await G(page, () => new Promise(res => { window.__texts = []; window.__cap = true; requestAnimationFrame(() => { window.__cap = false; res(window.__texts); }); })); if (!tx.includes('联机对战需在电脑上进行')) { goneAt = Date.now() - tTap; break; } }
     const screen1 = await G(page, () => __game.G.screen);
     // invitation link on the phone

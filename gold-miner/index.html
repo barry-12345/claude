@@ -3905,9 +3905,9 @@ function drawFinal(c, t) {
 // online final page: "play again" needs both players; "leave" goes back to the main menu
 function drawFinalNet(c, t) {
   const me = NETC.seats[NETC.you] || {}, other = NETC.seats[1 - NETC.you] || {};
-  drawBtn(c, 'net-again', W / 2 - 300, 610, 300, 70, me.again ? '等待对方…' : '再来一局', () => netAct('again'), { size: 30, fill: me.again ? 'rgba(40,140,70,0.95)' : 'rgba(170,110,20,0.95)', stroke: '#ffd23a' });
-  drawBtn(c, 'net-leave', W / 2 + 20, 610, 280, 70, '离开房间', () => netLeave(), { size: 28 });
-  if (other.again) T(c, '对方想再来一局!', W / 2, 592, { size: 24, align: 'center', color: '#7dff8a', stroke: '#0c1030', sw: 5 });
+  drawBtn(c, 'net-again', W / 2 - 300, 622, 300, 62, me.again ? '等待对方…' : '再来一局', () => netAct('again'), { size: 30, fill: me.again ? 'rgba(40,140,70,0.95)' : 'rgba(170,110,20,0.95)', stroke: '#ffd23a' });
+  drawBtn(c, 'net-leave', W / 2 + 20, 622, 280, 62, '离开房间', () => netLeave(), { size: 28 });
+  if (other.again) T(c, '对方想再来一局!', W / 2, 601, { size: 22, align: 'center', color: '#7dff8a', stroke: '#0c1030', sw: 5 });
   T(c, '空格 再来一局    Esc 离开房间', W / 2, 702, { size: 15, align: 'center', color: '#aab', bold: false });
 }
 function confetti(c, t) {
@@ -4450,7 +4450,7 @@ const NETC = {
   seats: [], phase: '', pause: null, pauseAt: 0, closed: null,
   buf: [], mirror: null, fxq: [], lastK: -1, arr: [], renderOff: null, D: 100, Dtarget: 100, lastDcalc: 0,
   pongOff: null, pongs: [], rtt: 0, rttMin: 0,
-  pred: null, shown: {}, lastFire: null, fireLog: [], rx: 0, tx: 0, seq: 0, ack: 0,
+  pred: null, inflight: 0, shown: {}, lastFire: null, fireLog: [], rx: 0, tx: 0, seq: 0, ack: 0,
   lastMsgAt: 0, lastSnapAt: 0, lastPing: 0, backoff: 0, reconnectAt: 0, timer: null,
   menuSel: 0, confirmLeave: 0, opp: null, rt: 0, frameAt: 0, hint: null, mine: { again: false, next: false },
 };
@@ -4634,7 +4634,7 @@ function netMsg(m) {
   switch (m.t) {
     case 'welcome':
       NETC.you = m.you; NETC.room = m.room; NETC.token = m.seat; NETC.fast = !!m.fast; NETC.connected = true; NETC.welcomed = true; NETC.backoff = 0;
-      NETC.buf = []; NETC.mirror = null; NETC.fxq = []; NETC.pred = null; NETC.arr = []; NETC.renderOff = null;
+      NETC.buf = []; NETC.mirror = null; NETC.fxq = []; NETC.pred = null; NETC.arr = []; NETC.renderOff = null; NETC.inflight = 0; NETC.ack = -1; NETC.seq = 0;
       netStoreSeat(); netSetHash(NETC.room);
       break;
     case 'room': netRoom(m); break;
@@ -4644,6 +4644,7 @@ function netMsg(m) {
       NETC.pongs.push({ rtt, off: m.k + rtt / 2 * NET_TICK / 1000 - now * NET_TICK / 1000 }); if (NETC.pongs.length > 10) NETC.pongs.shift();
       const best = NETC.pongs.reduce((a, b) => (b.rtt < a.rtt ? b : a));
       NETC.rtt = rtt; NETC.rttMin = best.rtt;
+      // server tick ~= s + RTT/2 of the fastest of the last 10 pings
       if (NETC.pongOff === null || Math.abs(best.off - NETC.pongOff) > 30) NETC.pongOff = best.off;
       else NETC.pongOff += clamp(best.off - NETC.pongOff, -0.6, 0.6);                    // gentle: at most 0.6 tick per pong (2 s)
       break;
@@ -4691,15 +4692,18 @@ function netSnap(m) {
   NETC.lastK = m.k; NETC.lastSnapAt = now;
   NETC.buf.push({ k: m.k, S: NETC.mirror });
   if (m.fx && m.fx.length) NETC.fxq.push({ k: m.k, fx: m.fx });
-  // arrival clock: the least-delayed snapshot of the last 3 s defines "now" on the server's tick line as seen from here
-  NETC.arr.push({ t: now, o: m.k - now * NET_TICK / 1000 });
+  // arrival clock: the least-delayed snapshot of the last 3 s defines "now" on the server's tick line as seen from here;
+  // jitter sample = change of the transit time from one snapshot to the next
+  const o = m.k - now * NET_TICK / 1000, prevO = NETC.arr.length ? NETC.arr[NETC.arr.length - 1].o : o;
+  NETC.arr.push({ t: now, o, j: Math.abs(o - prevO) * 1000 / NET_TICK });
   while (NETC.arr.length && NETC.arr[0].t < now - 3000) NETC.arr.shift();
   const best = NETC.arr.reduce((a, b) => Math.max(a, b.o), -Infinity);
-  if (NETC.renderOff === null || m.full || Math.abs(best - NETC.renderOff) > 30) NETC.renderOff = best;
-  NETC.offTarget = best;
+  const target = NETC.pongOff !== null ? Math.max(NETC.pongOff, best) : best;   // the server clock (from pongs), never behind what has arrived
+  if (NETC.renderOff === null || m.full || Math.abs(target - NETC.renderOff) > 30) NETC.renderOff = target;
+  NETC.offTarget = target;
   if (m.fire) for (const f of m.fire) if (f.p === NETC.you) {
     const shown = NETC.shown[f.seq];
-    const rec = { shownAngle: shown == null ? null : shown, serverAngle: Math.round(f.ang * 180 / Math.PI * 1000) / 1000, fireAt: f.fireAt, seq: f.seq, back: f.back };
+    const rec = { shownAngle: shown == null ? null : shown.a, serverAngle: Math.round(f.ang * 180 / Math.PI * 1000) / 1000, fireAt: f.fireAt, seq: f.seq, back: f.back, age: f.age, extra: shown == null ? null : shown.x, D: shown == null ? null : shown.D, sim: f.sim };
     NETC.lastFire = rec; NETC.fireLog.push(rec); if (NETC.fireLog.length > 400) NETC.fireLog.shift();
     delete NETC.shown[f.seq];
     if (NETC.pred && NETC.pred.seq === f.seq) { NETC.pred.confirmed = true; NETC.pred.fireAt = f.fireAt; }
@@ -4715,8 +4719,7 @@ function netSnap(m) {
 function netCalcD(now) {
   NETC.lastDcalc = now;
   if (NETC.arr.length < 5) return;
-  const best = NETC.arr.reduce((a, b) => Math.max(a, b.o), -Infinity);
-  const jit = NETC.arr.map(a => (best - a.o) * 1000 / NET_TICK).sort((a, b) => a - b);
+  const jit = NETC.arr.slice(1).map(a => a.j).sort((a, b) => a - b);
   const p95 = jit[Math.min(jit.length - 1, Math.floor(jit.length * 0.95))];
   NETC.Dtarget = clamp(2 * 1000 / NET_SNAP + 2 * p95, 66, 250);
   NETC.jitter = p95;
@@ -4812,12 +4815,24 @@ function netFrame(dt) {
 }
 // own hook: shown extending at once; the server's picture takes over when the interpolated frame reaches its confirmed fire
 function netPredict(now) {
+  const bl = NETC.blend, p = G.players[NETC.you];
+  if (bl) {                                   // after the hand-off: fade the remaining length difference out over 150 ms
+    const k = (now - bl.t0) / 150, h = p && p.hook;
+    if (!h || k >= 1 || h.state !== 'extend' || h.fireAt !== bl.fireAt) NETC.blend = null;
+    else h.len = Math.max(HOOK.minLen, h.len + bl.off * (1 - k));
+  }
   const pr = NETC.pred; if (!pr) return;
-  const p = G.players[NETC.you]; if (!p) { NETC.pred = null; return; }
+  if (!p) { NETC.pred = null; return; }
   const h = p.hook;
   if (G.screen !== 'play' || G.paused) { NETC.pred = null; return; }
-  if (pr.confirmed && h.state !== 'swing' && h.fireAt === pr.fireAt) { NETC.pred = null; return; }   // hand-off
-  if (!pr.confirmed && now - pr.t0 > 500) { NETC.pred = null; return; }                             // never confirmed
+  // hand-off: the interpolated frame has reached the confirmed fire (fireAt stays on the hook after it swings again, so a pull
+  // that started and ended between two drawn frames is handed off too)
+  if (pr.confirmed && h.fireAt === pr.fireAt) {
+    // the server catches up at most 18 ticks: when the input took longer, its hook is a little shorter than the predicted one
+    if (h.state === 'extend' && Math.abs(pr.len - h.len) > 1) { NETC.blend = { t0: now, off: pr.len - h.len, fireAt: pr.fireAt }; h.len = pr.len; }
+    NETC.pred = null; return;
+  }
+  if ((!pr.confirmed && now - pr.t0 > 500) || now - pr.t0 > 3000) { NETC.pred = null; return; }   // never confirmed (or lost)
   let target = HOOK.minLen + Math.max(1, pr.speed * (now - pr.t0) / 1000);
   while (!pr.stopped && pr.len < target) {
     pr.len = Math.min(target, pr.len + 5);
@@ -4845,12 +4860,19 @@ function netEaseOpponent(now) {               // the other hook may jump forward
 function netAct(a, extra) { const o = Object.assign({ t: 'in', s: ++NETC.seq, a }, extra || {}); netSend(o); return o.s; }
 function netFire() {
   const now = performance.now();
-  if (NETC.buf.length) netApplyAt(netRenderTick(now));
-  const rt = netRenderTick(now), p = G.players[NETC.you]; if (!p) return;
+  // the tick of the picture on screen: the render tick, or where the picture froze when data ran out (150 ms of extrapolation)
+  const lastK = NETC.buf.length ? NETC.buf[NETC.buf.length - 1].k : NETC.lastK;
+  const rt = Math.min(netRenderTick(now), lastK + 9);
+  if (NETC.buf.length) netApplyAt(rt);                       // rebuilds G.players: read the hook afterwards
+  const p = G.players[NETC.you]; if (!p) return;
   const h = p.hook;
+  // a fire still unanswered by the server (a stalled connection): the picture is stale, a second shot would aim at the past
+  if (!G.tug && NETC.inflight > NETC.ack) return;
   if (G.tug || NETC.pred || h.state !== 'swing' || !p.alive || p.frozen > 0 || G.timeUp || G.noFireT > 0 || G.paused) { netAct('fire', { at: Math.round(rt * 1000) / 1000 }); return; }
   const seq = netAct('fire', { at: Math.round(rt * 1000) / 1000 });
-  NETC.shown[seq] = Math.round(h.angle * 180 / Math.PI * 1000) / 1000;
+  // what this page showed when the key went down (stats().lastFire / fires): angle in degrees, ticks past the newest snapshot, D
+  NETC.shown[seq] = { a: Math.round(h.angle * 180 / Math.PI * 1000) / 1000, x: Math.round((rt - lastK) * 100) / 100, D: Math.round(NETC.D) };
+  NETC.inflight = seq;
   NETC.pred = { seq, t0: now, at: rt, angle: h.angle, len: HOOK.minLen, speed: netExtendSpeed(p), stopped: false, confirmed: false, fireAt: null };
 }
 function netKey(code) {
@@ -4929,6 +4951,9 @@ function netBoot() {
     netOpen(netResumeMsg);
   }
 }
+
+// an invitation pasted into a tab that already shows the game only changes the hash
+addEventListener('hashchange', () => { if (!NETC.on && netHashRoom() && G.screen === 'start') netBoot(); });
 
 // ---- canvas overlays during an online game
 function drawNetOverlay(c) {

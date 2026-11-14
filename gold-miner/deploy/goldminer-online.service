@@ -1,0 +1,25 @@
+[Unit]
+Description=Gold Miner online versus server (黄金矿工联机对战)
+After=network.target
+
+[Service]
+Type=simple
+User=goldminer
+Group=goldminer
+WorkingDirectory=/opt/goldminer-online
+EnvironmentFile=/etc/goldminer-online.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/goldminer-online/src/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=256M
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -16,19 +16,30 @@ function parseNetSim(str) {
   return o.lat || o.jitter || o.stallP ? o : null;
 }
 
-// A delayed, order-preserving pipe.  push(fn) runs fn after the simulated delay.
+// A delayed, order-preserving pipe.  push(fn) runs fn after the simulated delay.  One queue and one timer, so messages that
+// fall due in the same millisecond still run in the order they were sent (separate timers would not guarantee that).
 class DelayLine {
-  constructor(cfg, rnd = Math.random) { this.cfg = cfg; this.rnd = rnd; this.last = 0; this.timers = new Set(); }
+  constructor(cfg, rnd = Math.random) { this.cfg = cfg; this.rnd = rnd; this.last = 0; this.q = []; this.timer = null; }
   push(fn) {
     const c = this.cfg, now = Date.now();
     let d = c.lat + (this.rnd() * 2 - 1) * c.jitter;
-    if (c.stallP && this.rnd() < c.stallP) d += c.stallMs;
-    const at = Math.max(now + Math.max(0, d), this.last);
+    const stall = !!(c.stallP && this.rnd() < c.stallP);
+    if (stall) d += c.stallMs;
+    const own = now + Math.max(0, d), at = Math.max(own, this.last);
     this.last = at;
-    const t = setTimeout(() => { this.timers.delete(t); fn(); }, at - now);
-    this.timers.add(t);
+    this.q.push({ at, fn });
+    if (!this.timer) this._arm();
+    return { stall, held: Math.round(at - now) };              // (tests) whether this message was stalled, and its total delay
   }
-  clear() { for (const t of this.timers) clearTimeout(t); this.timers.clear(); }
+  _arm() {
+    if (!this.q.length) { this.timer = null; return; }
+    this.timer = setTimeout(() => {
+      const now = Date.now();
+      while (this.q.length && this.q[0].at <= now) this.q.shift().fn();
+      this._arm();
+    }, Math.max(0, this.q[0].at - Date.now()));
+  }
+  clear() { clearTimeout(this.timer); this.timer = null; this.q = []; }
 }
 
 module.exports = { parseNetSim, DelayLine };

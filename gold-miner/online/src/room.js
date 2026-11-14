@@ -175,15 +175,17 @@ class Room {
         const byK = new Map(net.hookHistory(slot).map(e => [e.k, e]));
         const lo = Math.floor(a), hi = Math.ceil(a);
         let ok = true;
-        for (let t = lo; t <= now; t++) { const e = byK.get(t); if (!e || !e.ok) { ok = false; break; } }
+        // the tick `lo` only counts when `at` is closer to it than to the next one (a fire in the very first tick of a swing)
+        const first = byK.get(lo), from = first && !first.ok && a - lo >= 0.5 ? hi : lo;
+        for (let t = from; t <= now; t++) { const e = byK.get(t); if (!e || !e.ok) { ok = false; break; } }
         if (ok) {
-          const e0 = byK.get(lo), e1 = byK.get(hi), ph = e0.ph + (e1.ph - e0.ph) * (a - lo);
+          const e0 = byK.get(lo), e1 = byK.get(hi), ph = from === lo ? e0.ph + (e1.ph - e0.ph) * (a - lo) : e1.ph;
           r = net.fireBackdated(slot, ph, Math.min(CATCHUP, Math.round(now - a)), a); back = true;
         }
       }
     }
     if (!back) r = net.input(slot, 'fire');    // plain fire (outside the window, or the hook was not swinging the whole time; also tug presses)
-    if (r) this.fires.push({ p: slot, fireAt: r.fireAt, seq: m.s, ang: Math.round(r.ang * 1e6) / 1e6, back });
+    if (r) this.fires.push({ p: slot, fireAt: r.fireAt, seq: m.s, ang: Math.round(r.ang * 1e6) / 1e6, back, age: typeof m.at === 'number' ? Math.round((now - m.at) * 100) / 100 : null, sim: m.sim });
     return r ? Object.assign({ back }, plain(r)) : null;
   }
 
