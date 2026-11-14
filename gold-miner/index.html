@@ -634,7 +634,7 @@ const G = {
   hazards: [], event: null, forceEvent: null, tug: null, banner: null, meteors: [], splitWith: null,
   stars: [], soloCum: [], soloSaved: [], liveStars: 0, ghostRec: null,
   finaleOn: false, hitStop: 0, stats: null, zoomT: 0, zoomX: 640, dispTeam: 0, toast: '', toastT: 0,   // phase 2
-  touchUI: TOUCH_UI, portrait: false, dprLevel: 2, minFont: 0, hudFont: null, tapGuardUntil: 0, dprReason: null,                         // phase 2.5 (touch)   // single player: stars per round, cumulative money per round, live star level, best record at game start
+  perfLevel: 0, touchUI: TOUCH_UI, portrait: false, dprLevel: 2, minFont: 0, hudFont: null, tapGuardUntil: 0, dprReason: null,                         // phase 2.5 (touch)   // single player: stars per round, cumulative money per round, live star level, best record at game start
 };
 // menu card index: touch UI is solo-only (the stored mode is neither used nor overwritten there)
 function loadMenuMode() { if (G.touchUI) G.mode = 'solo'; try { const i = MENU_ORDER.indexOf(lsGet('goldminer.mode')); G.menuMode = G.touchUI ? 0 : i >= 0 ? i : 1; } catch (e) { G.menuMode = G.touchUI ? 0 : 1; } }
@@ -4235,7 +4235,41 @@ function render() {
 //  Main loop (fixed timestep)
 // ---------------------------------------------------------------------
 let last = performance.now(), acc = 0, perfT = 0, perfN = 0, perfSkip = 0, perfBad = 0; const perfBuf = [];
+// ---- desktop: when play frames are slow (2 s window: median > 20 ms or 90th percentile > 34 ms) step down once per window, never back up:
+// level 1 = canvas resolution at most x1.5 of the CSS size, level 2 = x1 (only visual; ?perf=N forces a level and turns this off).
+// Measured (headless Chromium, 1728x1117 CSS px at DPR 2, CPU x4): canvas 3456x1944 -> 8 FPS, 1728x972 -> 18 FPS.
+const PERF_FORCE = /[?&]perf=([0-2])/.exec(location.search);
+let dpT = 0, dpSkip = 0; const dpBuf = [];
+function setPerfLevel(n, reason) {
+  G.perfLevel = n;
+  const want = n >= 2 ? 1 : n >= 1 ? 1.5 : 2;
+  if (want !== G.dprLevel) { G.dprLevel = want; resize(); }
+  if (reason) G.dprReason = Object.assign({ level: n }, reason);
+}
+function perfDesktop(raw) {
+  if (G.screen !== 'play' || G.paused || document.hidden || raw > 0.5 || G.perfLevel >= 2 || (window.devicePixelRatio || 1) <= 1) { dpT = 0; dpBuf.length = 0; return; }
+  if (dpSkip > 0) { dpSkip -= raw; return; }
+  dpBuf.push(raw); dpT += raw;
+  if (dpT < 2) return;
+  const sorted = dpBuf.slice().sort((x, y) => x - y), med = sorted[sorted.length >> 1], p90 = sorted[Math.floor(sorted.length * 0.9)];
+  dpT = 0; dpBuf.length = 0;
+  if (med > 0.02 || p90 > 0.034) {
+    let n = G.perfLevel + 1;
+    if (n === 1 && (window.devicePixelRatio || 1) <= 1.5) n = 2;               // a x1.5 step would change nothing
+    setPerfLevel(n, { medianFrameMs: Math.round(med * 10000) / 10, p90FrameMs: Math.round(p90 * 10000) / 10 });
+    dpSkip = 1;                                                                 // (the frames right after a resize are not representative)
+  }
+}
+// FPS and the longest frame of the last second (shown with ?netdebug=1)
+const fstat = { fps: 0, maxMs: 0, buf: [] };
+function frameStat(now, raw) {
+  fstat.buf.push([now, raw]);
+  while (fstat.buf.length && fstat.buf[0][0] < now - 1000) fstat.buf.shift();
+  fstat.fps = fstat.buf.length; fstat.maxMs = Math.round(fstat.buf.reduce((m, f) => Math.max(m, f[1]), 0) * 1000);
+}
 function frame(now) {
+  // desktop: the game runs at a fixed 60 Hz, so on 120 Hz (ProMotion) screens every other drawing is wasted work: skip it
+  if (!G.touchUI && now - last < 12) { requestAnimationFrame(frame); return; }
   const raw = (now - last) / 1000;
   let dt = raw; last = now;
   if (dt > 0.25) dt = 0.25;
@@ -4256,6 +4290,8 @@ function frame(now) {
       }
     }
   } else { perfT = 0; perfN = 0; perfBuf.length = 0; perfBad = 0; }
+  if (!G.touchUI && !PERF_FORCE) perfDesktop(raw);
+  frameStat(now, raw);
   if (netGame() || (NETC.on && G.screen !== 'start')) { acc = 0; netFrame(dt); }   // online: the server runs the game, this page only draws its snapshots
   else { acc += dt; while (acc >= STEP) { update(STEP); acc -= STEP; } }
   render();
@@ -4971,7 +5007,7 @@ function drawNetOverlay(c) {
   }
   if (/[?&]netdebug=1/.test(location.search)) {
     const s = netStats();
-    T(c, `RTT ${Math.round(s.rtt)}ms · 插值 ${Math.round(s.interpDelayMs)}ms · 缓冲 ${s.bufferLen}`, W - 10, H - 34, { size: 13, align: 'right', color: '#9fe3ff', bold: false });
+    T(c, `FPS ${fstat.fps} · 最长帧 ${fstat.maxMs}ms · 画质档 ${G.perfLevel} (${cv.width}×${cv.height}) · RTT ${Math.round(s.rtt)}ms · 插值 ${Math.round(s.interpDelayMs)}ms · 缓冲 ${s.bufferLen}`, W - 10, H - 34, { size: 13, align: 'right', color: '#9fe3ff', bold: false });
   }
   const pz = NETC.pause;
   if (!NETC.connected) { netPanel(c, '正在重新连接…', '网络恢复后会自动回到原来的座位', null); return; }
@@ -5028,7 +5064,7 @@ function drawGlobe(c, x, y, r) {
   c.restore();
 }
 function netStats() {
-  return { connected: NETC.connected, you: NETC.you, room: NETC.room, rtt: NETC.rtt, rttMin: NETC.rttMin, offsetTicks: NETC.pongOff, renderOffset: NETC.renderOff,
+  return { fps: fstat.fps, maxFrameMs: fstat.maxMs, perfLevel: G.perfLevel, connected: NETC.connected, you: NETC.you, room: NETC.room, rtt: NETC.rtt, rttMin: NETC.rttMin, offsetTicks: NETC.pongOff, renderOffset: NETC.renderOff,
     interpDelayMs: NETC.D, interpTargetMs: NETC.Dtarget, jitterMs: NETC.jitter, bufferLen: NETC.buf.length, predActive: !!NETC.pred, lastSnapTick: NETC.lastK, renderTick: NETC.rt,
     rxBytes: NETC.rx, txBytes: NETC.tx, lastFire: NETC.lastFire, fires: NETC.fireLog, ui: NETC.ui, pause: NETC.pause, seats: NETC.seats, phase: NETC.phase, closed: NETC.closed };
 }
@@ -5088,6 +5124,7 @@ window.__game = {
 };
 
 resize();
+if (PERF_FORCE && !G.touchUI) setPerfLevel(+PERF_FORCE[1]);
 netBoot();
 requestAnimationFrame(frame);
 })();
