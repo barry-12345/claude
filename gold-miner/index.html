@@ -23,13 +23,49 @@
        font:bold 30px/1.4 "PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Zen Hei",sans-serif;text-align:center}
   #rot svg{width:96px;height:96px;margin-bottom:18px;animation:rotphone 2.4s ease-in-out infinite}
   @keyframes rotphone{0%,15%{transform:rotate(0)}55%,85%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
+  /* online versus (phase 4): lobby / waiting room / messages, and the touch "use a computer" sheet */
+  #net,#net-touch{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(10,12,30,0.6);color:#e6ecff;
+       font:16px/1.5 "PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Zen Hei",sans-serif}
+  #net.net-hide,#net-touch{display:none}
+  .net-card{width:min(540px,calc(100vw - 32px));box-sizing:border-box;max-height:calc(100vh - 24px);overflow:auto;padding:22px 28px;border-radius:18px;
+       background:rgba(20,24,52,0.97);border:3px solid #ffd23a;box-shadow:0 12px 40px rgba(0,0,0,0.55)}
+  .net-title{font-size:30px;font-weight:bold;color:#ffd23a;text-align:center;margin-bottom:10px}
+  .net-lbl{display:block;color:#cfe0ff;font-size:14px;margin:6px 0 4px}
+  .net-in{box-sizing:border-box;width:100%;font:inherit;font-size:18px;padding:8px 12px;border-radius:10px;border:2px solid rgba(255,255,255,0.3);
+       background:#0e1230;color:#fff;outline:none;-webkit-user-select:text;user-select:text}
+  .net-in:focus{border-color:#ffd23a}
+  .net-btn{font:inherit;font-size:18px;font-weight:bold;padding:9px 18px;border-radius:10px;border:2px solid rgba(255,255,255,0.45);background:rgba(40,52,110,0.95);
+       color:#fff;cursor:pointer;white-space:nowrap}
+  .net-btn:hover{border-color:#ffd23a}
+  .net-main{background:rgba(170,110,20,0.95);border-color:#ffd23a}
+  .net-ghost{display:block;width:100%;margin-top:12px;background:transparent}
+  #net-create{display:block;width:100%;margin-top:12px}
+  .net-row{display:flex;gap:10px;margin-top:8px}
+  .net-row .net-in{flex:1;min-width:0}
+  .net-center{justify-content:center}
+  .net-codein{text-transform:uppercase;letter-spacing:4px}
+  .net-or{text-align:center;color:#9aa6d0;font-size:14px;margin-top:16px}
+  .net-err{min-height:24px;color:#ff9a8a;margin-top:8px;text-align:center}
+  .net-ok{min-height:22px;color:#7dff8a;text-align:center;font-size:14px;margin-top:4px}
+  .net-note{color:#cfe0ff;font-size:15px;text-align:center;margin-top:10px}
+  .net-note b{color:#ffe36b}
+  .net-big{font-size:58px;font-weight:bold;letter-spacing:12px;color:#ffe36b;text-align:center;line-height:1.2;-webkit-user-select:text;user-select:text}
+  .net-link{font-size:14px}
+  .net-seats{margin-top:12px;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,0.06)}
+  .net-seat{font-size:17px;line-height:1.9}
+  .net-nm{color:#fff;font-weight:bold}
+  .net-on{color:#7dff8a}.net-off{color:#ff9a8a}.net-dim{color:#9aa6d0}
+  .net-you{display:inline-block;padding:0 8px;border-radius:8px;background:#ffd23a;color:#1a2038;font-size:13px;font-weight:bold;line-height:20px}
+  .net-msgtext{font-size:22px;text-align:center;color:#ffe36b;margin:10px 0 16px}
+  .net-tcard{width:min(640px,calc(100vw - 32px))}
+  .net-tlink{margin-top:8px;padding:10px;border-radius:10px;background:#0e1230;color:#fff;font-size:15px;word-break:break-all;text-align:center;-webkit-user-select:text;user-select:text}
 </style>
 </head>
 <body>
 <canvas id="c" tabindex="0"></canvas>
 <div id="safe"></div>
 <div id="rot"><svg viewBox="0 0 64 64" fill="none" stroke="#ffd23a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="20" y="6" width="24" height="44" rx="4"/><line x1="29" y1="45" x2="35" y2="45"/><path d="M12 58h40M46 52l6 6-6 6" stroke="#ffe36b"/></svg><div>请横屏游玩</div></div>
-<script>
+<script id="gm-main">
 'use strict';
 (() => {
 // `?seed=N` makes every Math.random() call deterministic (tests only); must run before anything else.
@@ -275,6 +311,9 @@ function mulberry(seed) {
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
 }
+// ---- online (phase 4): the authoritative server runs this same script; there, effects are collected instead of drawn
+let fxSink = null;                    // array on the server (particles, pop-up texts, sounds), null in the browser
+let itemSeq = 0;                      // stable item ids (snapshots refer to items by id); never touches Math.random()
 function weightedPick(w) {
   let sum = 0; for (const k in w) sum += w[k];
   if (sum <= 0) return null;
@@ -411,6 +450,7 @@ const Snd = {
     } catch (e) {}
   },
   play(name, a) {
+    if (fxSink) { fxSink.push(['s', name, a]); return; }
     switch (name) {
       case 'fire':  this.noise(0.18, { filter: 'bandpass', f0: 1800, f1: 500, vol: 0.14 }); this.tone(520, 0.15, { type: 'triangle', slide: 0.6, vol: 0.07 }); break;
       case 'grab':  this.tone(170, 0.12, { type: 'square', slide: 0.5, vol: 0.14 }); this.noise(0.06, { f0: 3000, f1: 800, vol: 0.12 }); break;
@@ -734,7 +774,7 @@ function rollBag() {
 function makeItem(type, x, y) {
   const def = ITEMS[type];
   const it = {
-    type, x, y, r: def.r, hr: def.hit || def.r * 0.9, value: def.value, weight: def.weight,
+    id: ++itemSeq, type, x, y, r: def.r, hr: def.hit || def.r * 0.9, value: def.value, weight: def.weight,
     seed: Math.floor(Math.random() * 1e9), grabbedBy: -1, dead: false, cracked: false, phase: Math.random() * 6.28,
     dir: Math.random() < 0.5 ? -1 : 1, occ: [{ x, y, r: def.r }],
   };
@@ -859,9 +899,11 @@ function hookTip(p) {
   return { x: p.x + Math.sin(h.angle) * h.len, y: PIVOT_Y + Math.cos(h.angle) * h.len };
 }
 function floatText(x, y, s, color, size, life) {
+  if (fxSink) fxSink.push(['t', x, y, s, color || '#ffe36b', size || 30, life || 1.4]);
   G.texts.push({ x, y, s, color: color || '#ffe36b', size: size || 30, life: life || 1.4, max: life || 1.4 });
 }
 function addP(o) {
+  if (fxSink) { fxSink.push(['p', o]); return; }                          // server: the particle is replayed by the clients
   if (G.touchUI && G.particles.length >= (reduceFxOn ? 150 : 300)) return;   // phones: cap the particle count
   G.particles.push(Object.assign({ x: 0, y: 0, vx: 0, vy: 0, g: 0, life: 0.6, max: 0.6, size: 4, color: '#fff', kind: 'spark', rot: 0, vr: 0, r1: 0 }, o, { max: o.life || 0.6 }));
 }
@@ -1782,6 +1824,7 @@ function handleKey(code) {
       else if (code === 'KeyD' || code === 'ArrowRight') setMenuMode(G.menuMode + 1);
       else if (code in DIGIT_MODE) setMenuMode(DIGIT_MODE[code]);
       else if (code === 'Tab') G.legendPage = (G.legendPage + 1) % LEGEND_PAGE_COUNT;
+      else if (code === 'KeyO') netOpenLobby();                       // phase 4: online versus (desktop; touch shows a hint)
       else if (code === 'Space') {
         if (G.touchUI) G.mode = 'solo'; else { G.mode = MENU_ORDER[G.menuMode]; lsSet('goldminer.mode', G.mode); }
         G.sel = [{ idx: G.chars[0], ready: false }, { idx: G.chars[1], ready: false }]; G.selT = 0; G.screen = 'select';
@@ -1816,6 +1859,7 @@ function handleKey(code) {
   }
 }
 addEventListener('keydown', e => {
+  if (netKeyHook(e)) return;                                // online lobby / room (phase 4) handle their own keys
   if (BLOCK.has(e.code)) e.preventDefault();
   Snd.init();
   if (e.repeat) return;
@@ -3138,7 +3182,16 @@ function drawPlayerPanel(c, p, target) {
   panel(c, x, y, w, h, { stroke: p.color, lw: 3, fill: 'rgba(16,22,52,0.78)' });
   drawPortrait(c, p.char || 0, x + 30, y + 28, 24, p.color, p.dark, !p.alive);
   if (!p.alive) { T(c, p.name + '  已淘汰', x + 66, y + 28, { size: 22, color: '#aab' }); return; }
-  T(c, isSolo() ? `单人 · ${chOf(p).name}` : `P${p.id + 1} ${chOf(p).name}`, x + 62, y + 11, { size: 12, color: '#cfe0ff', bold: false });
+  let cap = isSolo() ? `单人 · ${chOf(p).name}` : `P${p.id + 1} ${chOf(p).name}`;
+  if (netGame()) {                                          // online: nickname, and a "你" tag on this page's own panel
+    cap = `P${p.id + 1} ${p.name} · ${chOf(p).name}`;
+    c.save(); c.font = `12px ${FONT}`; if (c.measureText(cap).width > 112) cap = `P${p.id + 1} ${p.name}`; const cw = Math.min(112, c.measureText(cap).width); c.restore();
+    if (p.id === NETC.you) {
+      c.save(); rr(c, x - 3, y - 3, w + 6, h + 6, 16); c.lineWidth = 2; c.strokeStyle = '#fff'; c.stroke(); c.restore();
+      rr(c, x + 68 + cw, y + 2, 32, 18, 8); c.fillStyle = '#ffd23a'; c.fill(); T(c, '你', x + 84 + cw, y + 11, { size: 13, align: 'center', color: '#1a2038' });
+    }
+  }
+  T(c, cap, x + 62, y + 11, { size: 12, color: '#cfe0ff', bold: false });
   if (coop) {
     T(c, '+' + fmt(p.roundGain), x + 62, y + 30, { size: 24, color: '#ffe36b', stroke: '#1a2038', sw: 4 });
     T(c, '本关个人贡献', x + 62, y + 47, { size: 11, bold: false, color: '#9fb0d8' });
@@ -3319,7 +3372,7 @@ function drawHUD(c) {
   // key hints at the start of the very first round
   if (G.screen === 'play' && G.round === 1 && G.playT < 8) {
     const a = clamp(1 - (G.playT - 5) / 3, 0, 1) * 0.9;
-    for (const p of G.players) if (p.alive && p.frozen <= 0 && !p.clover && p.caught === 0) T(c, `${p.cfg.labels.fire} 发射钩子    ${p.cfg.labels.dyn} 使用炸药`, p.x, 80, { size: 16, align: 'center', color: '#fff', stroke: 'rgba(0,0,0,0.6)', sw: 4, alpha: a });
+    for (const p of G.players) if (p.alive && p.frozen <= 0 && !p.clover && p.caught === 0 && (!netGame() || p.id === NETC.you)) T(c, netGame() ? 'S/↓ 发射钩子    W/↑ 使用炸药' : `${p.cfg.labels.fire} 发射钩子    ${p.cfg.labels.dyn} 使用炸药`, p.x, 80, { size: 16, align: 'center', color: '#fff', stroke: 'rgba(0,0,0,0.6)', sw: 4, alpha: a });
   }
   T(c, 'P 暂停', 10, H - 12, { size: 13, color: 'rgba(255,255,255,0.6)', bold: false });
   T(c, 'M 静音', W - 10, H - 12, { size: 13, align: 'right', color: 'rgba(255,255,255,0.55)', bold: false });
@@ -3418,6 +3471,8 @@ function drawStartTouch(c, t) {
     for (const [ax, ay, dx, dy] of [[1198, 26, 1, 1], [1252, 26, -1, 1], [1198, 56, 1, -1], [1252, 56, -1, -1]]) { c.moveTo(ax + dx * 12, ay); c.lineTo(ax, ay); c.lineTo(ax, ay + dy * 10); }
     c.stroke(); c.lineCap = 'butt';
   } else T(c, '添加到主屏幕可全屏游玩', W - 20, 40, { size: 20, align: 'right', color: '#cfe0ff', bold: false });
+  // phase 4: online versus is desktop-only; on touch the grey button only explains that (no connection is ever made)
+  drawBtn(c, 'btn-online', 1040, 352, 210, 102, '联机对战', () => netHint('联机对战需在电脑上进行', 2.5), { size: 26, fill: 'rgba(70,74,92,0.92)', stroke: 'rgba(255,255,255,0.3)', color: '#c5cad8' });
 }
 function drawStart(c, t) {
   if (G.touchUI) { drawStartTouch(c, t); return; }
@@ -3510,6 +3565,9 @@ function drawStart(c, t) {
   const blink = 0.55 + 0.45 * Math.sin(t * 5);
   T(c, '按空格开始', W / 2, 684, { size: 34, align: 'center', color: '#fff', stroke: '#7a2a08', sw: 8, alpha: blink });
   T(c, 'A/D 或 ←/→ 移动选择    1/2/3 直选模式    空格:确认/继续    Tab:翻图鉴    P 或 Esc:暂停    M:静音', 640, 710, { size: 13, align: 'center', color: '#aab', bold: false });
+  // phase 4: online versus is a button under the cards' area, not a fourth card (MENU_ORDER / G.menuMode unchanged)
+  drawBtn(c, 'btn-online', 1060, 662, 190, 40, '', () => netOpenLobby(), { r: 12, fill: 'rgba(30,90,150,0.92)', stroke: '#7fd0ff' });
+  drawGlobe(c, 1088, 682, 11); T(c, '联机(O)', 1166, 682, { size: 20, align: 'center' });
 }
 function keycap(c, label, x, y, col, k = 1) {
   c.save(); c.font = `bold ${20 * k}px ${FONT}`;
@@ -3549,7 +3607,7 @@ function drawSelect(c, t) {
   if (G.touchUI) { drawSelectTouch(c, t); return; }
   c.drawImage(curBg(), 0, 0, W, H); drawClouds(c, t); dim(c, 0.62);
   T(c, '选择角色', W / 2, 40, { size: 50, align: 'center', color: '#ffd23a', stroke: '#7a3a08', sw: 9 });
-  T(c, { solo: '单人模式', versus: '对战模式', coop: '合作模式' }[G.mode] + ' · 每个角色只有被动能力,没有主动技能', W / 2, 82, { size: 17, align: 'center', color: '#cfe0ff', bold: false });
+  T(c, (netGame() ? '联机对战' : { solo: '单人模式', versus: '对战模式', coop: '合作模式' }[G.mode]) + ' · 每个角色只有被动能力,没有主动技能', W / 2, 82, { size: 17, align: 'center', color: '#cfe0ff', bold: false });
   const cw = 188, gap = 14, x0 = (W - (CHARS.length * cw + (CHARS.length - 1) * gap)) / 2, y0 = 104, ch_ = 330;
   CHARS.forEach((ch, i) => {
     const solo = isSolo();
@@ -3569,20 +3627,22 @@ function drawSelect(c, t) {
     if (on1) { rr(c, x + cw - 46, y0 + 10, 36, 22, 8); c.fillStyle = '#ee4b42'; c.fill(); T(c, 'P2', x + cw - 28, y0 + 21, { size: 14, align: 'center' }); if (s1.ready) { c.strokeStyle = '#7dff8a'; c.lineWidth = 3; c.beginPath(); c.moveTo(x + cw - 64, y0 + 21); c.lineTo(x + cw - 59, y0 + 26); c.lineTo(x + cw - 50, y0 + 14); c.stroke(); } }
     c.save(); c.font = `bold 15px ${FONT}`; c.restore();
     TW(c, ch.passive, x + cw / 2, y0 + 204, cw - 26, 22, { size: 15, align: 'center', bold: false, color: '#e6ecff' });
+    if (netGame() && G.sel[NETC.you] && !G.sel[NETC.you].ready) UI.btn('char-' + i, x, y0, cw, ch_, () => netAct('pick', { i }));   // online: click = choose + confirm
   });
   (isSolo() ? [0] : [0, 1]).forEach(i => {
     const p = isSolo() ? SOLO_CFG : PLAYER_CFG[i], st = G.sel[i], ch = CHARS[st.idx], x = isSolo() ? 360 : 60 + i * 620, y = 452, w = 560, h = 190;
     panel(c, x, y, w, h, { stroke: p.color, lw: 4, fill: 'rgba(20,24,52,0.88)' });
     drawPortrait(c, st.idx, x + 64, y + 66, 44, p.color, p.dark);
-    T(c, `${p.name}`, x + 130, y + 36, { size: 24, color: i ? '#ff8a84' : '#6fb0ff' });
+    T(c, netGame() ? netNick(i) + (i === NETC.you ? '(你)' : '') : `${p.name}`, x + 130, y + 36, { size: 24, color: i ? '#ff8a84' : '#6fb0ff' });
+    if (netGame() && i === NETC.you) { c.save(); rr(c, x - 4, y - 4, w + 8, h + 8, 18); c.lineWidth = 2; c.strokeStyle = '#fff'; c.stroke(); c.restore(); }
     T(c, ch.name, x + 130, y + 72, { size: 32 });
     TW(c, '被动:' + ch.passive, x + 24, y + 126, w - 48, 22, { size: 16, bold: false, color: '#e6ecff' });
     T(c, st.ready ? '已确认' : '选择中…', x + w - 24, y + 36, { size: 22, align: 'right', color: st.ready ? '#7dff8a' : '#ffd23a', alpha: st.ready ? 1 : 0.6 + 0.4 * Math.sin(t * 6) });
     const k = p.labels;
-    T(c, `${k.left}${isSolo() ? ' ' : '/'}${k.right} 选择    ${k.buy} 确认    ${k.ready} 取消`, x + w - 24, y + h - 20, { size: 15, align: 'right', color: '#9aa6d0', bold: false });
+    T(c, !netGame() ? `${k.left}${isSolo() ? ' ' : '/'}${k.right} 选择    ${k.buy} 确认    ${k.ready} 取消` : i === NETC.you ? 'A/D 或 ←/→ 选择    S/↓ 确认    W/↑ 取消' : '对方在自己的电脑上选择', x + w - 24, y + h - 20, { size: 15, align: 'right', color: '#9aa6d0', bold: false });
   });
   const both = G.sel[0].ready && (isSolo() || G.sel[1].ready);
-  T(c, both ? '准备开始…' : isSolo() ? '确认后开始    Esc 返回' : '双方都确认后开始    Esc 返回', W / 2, 676, { size: 26, align: 'center', color: '#fff', stroke: '#7a2a08', sw: 6, alpha: both ? 1 : 0.55 + 0.45 * Math.sin(t * 5) });
+  T(c, both ? '准备开始…' : isSolo() ? '确认后开始    Esc 返回' : netGame() ? '双方都确认后开始' : '双方都确认后开始    Esc 返回', W / 2, 676, { size: 26, align: 'center', color: '#fff', stroke: '#7a2a08', sw: 6, alpha: both ? 1 : 0.55 + 0.45 * Math.sin(t * 5) });
 }
 function drawIntro(c, t) {
   drawScene(c, t); drawHUD(c);
@@ -3616,7 +3676,7 @@ function drawIntro(c, t) {
     T(c, '随机事件:' + e.name, 330, 494 + sd, { size: 22, color: '#ffe36b' });
     T(c, e.desc, 330, 516 + sd, { size: 15, bold: false, color: '#e6ecff' });
   }
-  T(c, G.touchUI ? '点按任意位置跳过' : '空格:跳过', W / 2, (G.event ? 546 : 466) + sd + (G.touchUI ? 8 : 0), { size: 14, align: 'center', color: '#aab', bold: false });
+  if (!netGame()) T(c, G.touchUI ? '点按任意位置跳过' : '空格:跳过', W / 2, (G.event ? 546 : 466) + sd + (G.touchUI ? 8 : 0), { size: 14, align: 'center', color: '#aab', bold: false });
 }
 
 function drawResults(c, t) {
@@ -3633,6 +3693,10 @@ function drawResults(c, t) {
     drawPortrait(c, p.char || 0, x + 52, y + 52, 34, p.color, p.dark, !r.wasAlive);
     T(c, p.name, x + 100, y + 42, { size: 32, color: i ? '#ff8a84' : '#6fb0ff' });
     T(c, chOf(p).name, x + 100, y + 72, { size: 18, color: '#cfe0ff', bold: false });
+    if (netGame()) {                                          // online: "continue" pressed on that computer
+      if (i === NETC.you) { rr(c, x + w - 64, y + 18, 44, 22, 8); c.fillStyle = '#ffd23a'; c.fill(); T(c, '你', x + w - 42, y + 29, { size: 14, align: 'center', color: '#1a2038' }); }
+      if (NETC.seats[i] && NETC.seats[i].next) T(c, '✓ 继续', x + w - 24, y + 66, { size: 22, align: 'right', color: '#7dff8a' });
+    }
     if (!r.wasAlive) {
       T(c, '已被淘汰', x + w / 2, y + 220, { size: 48, align: 'center', color: '#99a' });
       T(c, `在第 ${p.elimRound} 关淘汰`, x + w / 2, y + 275, { size: 24, align: 'center', color: '#99a', bold: false });
@@ -3662,7 +3726,8 @@ function drawResults(c, t) {
     c.restore();
   });
   const alive = alivePlayers();
-  const nextTxt = (G.round >= ROUNDS || alive.length < versusMinAlive()) ? '按空格查看最终结果' : '按空格进入商店';
+  let nextTxt = (G.round >= ROUNDS || alive.length < versusMinAlive()) ? '按空格查看最终结果' : '按空格进入商店';
+  if (netGame()) nextTxt = `${NETC.seats[NETC.you] && NETC.seats[NETC.you].next ? '等待对方' : '按空格继续'} · ${Math.max(0, Math.ceil(6 - G.resultsT))} 秒后自动继续`;
   T(c, nextTxt, W / 2, 640, { size: 36, align: 'center', color: '#fff', stroke: '#7a2a08', sw: 7, alpha: 0.6 + 0.4 * Math.sin(t * 5) });
 }
 function drawResultsCoop(c, t) {
@@ -3734,6 +3799,12 @@ function drawShop(c, t) {
       c.restore(); return;
     }
     const k = p.cfg.labels, wallet = moneyOf(p);
+    if (netGame() && i !== NETC.you) {                       // online: the other player's shop stays private
+      drawPortrait(c, p.char || 0, x0 + 320, 250, 56, p.color, p.dark);
+      T(c, p.name, x0 + 320, 350, { size: 36, align: 'center', color: i ? '#ff8a84' : '#6fb0ff', stroke: '#0c1030', sw: 6 });
+      T(c, s.ready ? '已准备' : '选购中…', x0 + 320, 412, { size: 40, align: 'center', color: s.ready ? '#7dff8a' : '#ffd23a', alpha: s.ready ? 1 : 0.6 + 0.4 * Math.sin(t * 5) });
+      c.restore(); return;
+    }
     drawPortrait(c, p.char || 0, x0 + 96, 60, 30, p.color, p.dark);
     T(c, p.name + ' 的商店', x0 + 340, 62, { size: 34, align: 'center', color: i ? '#ff8a84' : '#6fb0ff', stroke: '#0c1030', sw: 6 });
     T(c, (coop ? '团队金库 ' : '金币 ') + fmt(wallet), x0 + 320, 108, { size: 32, align: 'center', color: '#ffe36b', stroke: '#0c1030', sw: 5 });
@@ -3752,6 +3823,7 @@ function drawShop(c, t) {
       const col = e % 3, row = Math.floor(e / 3), cx = x0 + 28 + col * 200, cy = 200 + row * 136, cw = 184, ch = 124;
       const sel = s.sel === e, isReady = e === s.offers.length;
       const pop = sel ? 1 + 0.02 * Math.sin(t * 8) : 1;
+      if (netGame()) UI.btn('shop-card-' + e, cx, cy, cw, ch, () => netAct('pick', { i: e }));
       c.save(); c.translate(cx + cw / 2, cy + ch / 2); c.scale(pop, pop); c.translate(-cw / 2, -ch / 2);
       rr(c, 0, 0, cw, ch, 14);
       c.fillStyle = isReady ? (s.ready ? 'rgba(40,140,70,0.9)' : 'rgba(40,52,100,0.9)') : 'rgba(34,40,80,0.9)'; c.fill();
@@ -3781,7 +3853,7 @@ function drawShop(c, t) {
       const desc = s.sel === s.offers.length ? '准备好后点击下一关,双方都准备好才会开始' : SHOP[s.offers[s.sel].id].desc;
       TW(c, desc, x0 + 320, 640, 548, 22, { size: 17, align: 'center', bold: false });
     }
-    T(c, `${k.left}/${k.right} 选择    ${k.buy} 购买    ${k.ready} 准备好了`, x0 + 320, 680, { size: 14, align: 'center', color: '#9aa6d0', bold: false });
+    T(c, netGame() ? 'A/D 或 ←/→ 选择    S/↓ 购买    W/↑ 准备好了' : `${k.left}/${k.right} 选择    ${k.buy} 购买    ${k.ready} 准备好了`, x0 + 320, 680, { size: 14, align: 'center', color: '#9aa6d0', bold: false });
     if (s.ready) T(c, '已准备', x0 + 600, 28, { size: 20, align: 'right', color: '#7dff8a' });
     c.restore();
   });
@@ -3826,8 +3898,17 @@ function drawFinal(c, t) {
     T(c, '最终得分', x + 30, y + 90, { size: 24, color: '#cfe0ff' });
     T(c, fmt(p.money), x + w - 30, y + 98, { size: 52, align: 'right', color: '#ffe36b', stroke: '#1a2038', sw: 6 });
   });
+  if (netGame()) { drawFinalNet(c, t); return; }
   T(c, '按空格再来一局', W / 2, 650, { size: 44, align: 'center', color: '#fff', stroke: '#7a2a08', sw: 8, alpha: 0.6 + 0.4 * Math.sin(t * 5) });
   T(c, 'Esc 返回主菜单', W / 2, 692, { size: 15, align: 'center', color: '#aab', bold: false });
+}
+// online final page: "play again" needs both players; "leave" goes back to the main menu
+function drawFinalNet(c, t) {
+  const me = NETC.seats[NETC.you] || {}, other = NETC.seats[1 - NETC.you] || {};
+  drawBtn(c, 'net-again', W / 2 - 300, 610, 300, 70, me.again ? '等待对方…' : '再来一局', () => netAct('again'), { size: 30, fill: me.again ? 'rgba(40,140,70,0.95)' : 'rgba(170,110,20,0.95)', stroke: '#ffd23a' });
+  drawBtn(c, 'net-leave', W / 2 + 20, 610, 280, 70, '离开房间', () => netLeave(), { size: 28 });
+  if (other.again) T(c, '对方想再来一局!', W / 2, 592, { size: 24, align: 'center', color: '#7dff8a', stroke: '#0c1030', sw: 5 });
+  T(c, '空格 再来一局    Esc 离开房间', W / 2, 702, { size: 15, align: 'center', color: '#aab', bold: false });
 }
 function confetti(c, t) {
   const rnd = mulberry(5);
@@ -4137,7 +4218,9 @@ function render() {
     case 'final': drawFinal(c, G.t); break;
   }
   c.restore();
-  if (G.paused) drawPause(c);
+  if (G.paused && !NETC.on) drawPause(c);
+  if (netGame()) drawNetOverlay(c);
+  drawNetHint(c);
   if (G.toastT > 0) {   // bottom-right toast (V key)
     const a = clamp(G.toastT / 0.3, 0, 1);
     const tz = fsz({ size: 18 }, 18);
@@ -4173,10 +4256,746 @@ function frame(now) {
       }
     }
   } else { perfT = 0; perfN = 0; perfBuf.length = 0; perfBad = 0; }
-  acc += dt;
-  while (acc >= STEP) { update(STEP); acc -= STEP; }
+  if (netGame() || (NETC.on && G.screen !== 'start')) { acc = 0; netFrame(dt); }   // online: the server runs the game, this page only draws its snapshots
+  else { acc += dt; while (acc >= STEP) { update(STEP); acc -= STEP; } }
   render();
   requestAnimationFrame(frame);
+}
+
+// =====================================================================
+//  ONLINE VERSUS (phase 4)
+//  The authoritative server (online/src/sim-host.js) runs this very script in a node:vm sandbox and drives it through
+//  __game.net (step / input / fireBackdated / snapshot / fxDrain).  Browsers in an online room never run the game
+//  logic: they send inputs, buffer the 30 Hz snapshots and draw an interpolated picture (plus a local prediction of
+//  their own hook).  Nothing here changes a rule, a number or the Math.random() sequence of the local modes.
+// =====================================================================
+const NET_PROTO = 1;
+const NET_TICK = 60, NET_SNAP = 30;
+const NET_HIST = 30, NET_CATCHUP = 18;            // lag compensation: angle look-back window / catch-up ticks
+const NET_FX_MAX = 150;                           // effects per snapshot
+// FNV-1a 64 over the UTF-16 code units of the game script, as 16 hex digits (two 32-bit halves, no BigInt: ~2 ms)
+function fnv64(str) {
+  let hi = 0xcbf29ce4, lo = 0x84222325;
+  for (let i = 0; i < str.length; i++) {
+    lo ^= str.charCodeAt(i);
+    const t = lo * 0x1b3, carry = Math.floor(t / 4294967296);
+    hi = (hi * 0x1b3 + carry + (lo * 256) % 4294967296) % 4294967296;       // prime = 2^40 + 0x1b3: (lo << 40) lands in hi << 8
+    lo = t % 4294967296;
+  }
+  return (hi >>> 0).toString(16).padStart(8, '0') + (lo >>> 0).toString(16).padStart(8, '0');
+}
+const NET_BUILD = (() => {
+  if (typeof window.__GM_BUILD_OVERRIDE === 'string') return window.__GM_BUILD_OVERRIDE;             // tests only (O-25)
+  try { const el = document.getElementById('gm-main'); return fnv64(el ? el.textContent : ''); } catch (e) { return '0'; }
+})();
+// ---- snapshot: a plain-JSON picture of everything the renderer reads (numbers rounded to 1e-3)
+const nr = v => (Number.isInteger(v) ? v : Math.round(v * 1000) / 1000);
+function njson(v) {                                // deep copy -> JSON-safe, rounded; drops functions / undefined / non-finite numbers
+  if (typeof v === 'number') return Number.isFinite(v) ? nr(v) : null;
+  if (v === null || typeof v !== 'object') return typeof v === 'function' || v === undefined ? null : v;
+  if (Array.isArray(v)) return v.map(njson);
+  const o = {};
+  for (const k in v) { const x = v[k]; if (x === undefined || typeof x === 'function') continue; o[k] = njson(x); }
+  return o;
+}
+const NET_SCALARS = ['gt', 'screen', 'mode', 'round', 'time', 'timeUp', 'overtime', 'introT', 'resultsT', 'playT', 'hitStop', 'shake', 'zoomT', 'zoomX',
+  'finaleOn', 'paused', 'cleared', 'teamMoney', 'dispTeam', 'selT', 'noFireT', 'liveStars'];
+const NET_OBJS = ['chars', 'sel', 'shop', 'results', 'teamResult', 'final', 'stats', 'event', 'meteors', 'bolts', 'banner', 'stars', 'soloCum', 'soloSaved'];
+const P_KEYS = ['id', 'name', 'char', 'money', 'roundStart', 'roundGain', 'dyn', 'caught', 'medal', 'diceGain', 'buffs', 'pending', 'clover', 'frozen', 'shieldFlash', 'disp', 'alive', 'elimRound'];
+const H_KEYS = ['state', 'phase', 'angle', 'len', 'offx', 'offy', 'blast', 'fireAt', 'assistOf', 'assistId'];
+function netSnapshot() {
+  const S = {};
+  for (const k of NET_SCALARS) S[k] = njson(k === 'gt' ? G.t : G[k]);
+  for (const k of NET_OBJS) S[k] = njson(G[k] === undefined ? null : G[k]);
+  S.players = G.players.map(p => {
+    const P = {}; for (const k of P_KEYS) P[k] = njson(p[k] === undefined ? null : p[k]);
+    const H = {}; for (const k of H_KEYS) H[k] = njson(p.hook[k] === undefined ? null : p.hook[k]);
+    H.item = p.hook.item ? p.hook.item.id : -1;
+    P.hook = H; return P;
+  });
+  S.items = G.items.map(it => {
+    const I = {};
+    for (const k in it) { if (k === 'occ' || k === 'stuck') continue; const x = it[k]; if (x !== undefined && typeof x !== 'function') I[k] = njson(x); }
+    if (it.stuck) I.stuck = it.stuck.map(o => o.id);
+    return I;
+  });
+  S.hazards = G.hazards.map(h => { const o = {}; for (const k in h) if (k !== 'occ') o[k] = njson(h[k]); return o; });
+  S.tug = G.tug ? Object.assign(njson(Object.assign({}, G.tug, { item: 0 })), { item: G.tug.item ? G.tug.item.id : -1 }) : null;
+  return S;
+}
+// ---- delta patch (the server builds deltas with online/src/delta.js; this is the matching client half)
+// object delta: { s: {key: new value}, d: {key: sub-delta}, x: [deleted keys] }; array delta: { a: {index: sub-delta} } (same length);
+// id-list delta (arrays of objects with an `id`): { i: { '-': [ids], u: {id: sub-delta}, '+': [new elements] } }.  Unchanged parts are shared.
+function netPatch(base, d) {
+  if (d && d.i) {                                          // id-keyed list
+    const del = new Set(d.i['-'] || []), upd = d.i.u || {};
+    const out = [];
+    for (const el of base) { if (del.has(el.id)) continue; out.push(upd[el.id] ? netPatch(el, upd[el.id]) : el); }
+    for (const el of d.i['+'] || []) out.push(el);
+    return out;
+  }
+  if (d && d.a) { const out = base.slice(); for (const i in d.a) out[i] = netPatch(base[i], d.a[i]); return out; }
+  const out = Object.assign({}, base);
+  if (d.s) for (const k in d.s) out[k] = d.s[k];
+  if (d.d) for (const k in d.d) out[k] = netPatch(base[k], d.d[k]);
+  if (d.x) for (const k of d.x) delete out[k];
+  return out;
+}
+// ---- effects stream: compact arrays, replayed by the clients with the original addP / floatText / Snd.play
+const FX_PKEYS = ['kind', 'x', 'y', 'vx', 'vy', 'g', 'life', 'size', 'color', 'rot', 'vr', 'r1'];
+const FX_AMBIENT = new Set(['smoke', 'star', 'fire']);
+function fxDrain() {
+  const raw = fxSink || []; if (fxSink) fxSink = [];
+  let parts = 0; for (const e of raw) if (e[0] === 'p') parts++;
+  let drop = Math.max(0, raw.length - NET_FX_MAX);         // over the cap: ambient particles go first, then the oldest other particles
+  const keep = raw.map(() => true);
+  for (let pass = 0; pass < 2 && drop > 0; pass++) for (let i = 0; i < raw.length && drop > 0; i++) {
+    const e = raw[i]; if (e[0] !== 'p' || !keep[i]) continue;
+    if (pass === 0 && !FX_AMBIENT.has(e[1].kind)) continue;
+    keep[i] = false; drop--;
+  }
+  const out = [];
+  raw.forEach((e, i) => {
+    if (!keep[i]) return;
+    if (e[0] === 'p') { const o = e[1]; out.push(['p'].concat(FX_PKEYS.map(k => (o[k] === undefined ? null : typeof o[k] === 'number' ? Math.round(o[k] * 100) / 100 : o[k])))); }
+    else out.push(e.map(v => (typeof v === 'number' ? Math.round(v * 100) / 100 : v === undefined ? null : v)));
+  });
+  return out;
+}
+function fxReplay(list) {
+  let n = 0;
+  for (const e of list) {
+    if (e[0] === 'p') {
+      if (reduceFxOn && (n++ & 1)) continue;               // reduced effects: half of the particles
+      const o = {}; FX_PKEYS.forEach((k, i) => { if (e[i + 1] !== null) o[k] = e[i + 1]; }); addP(o);
+    } else if (e[0] === 't') floatText(e[1], e[2], e[3], e[4], e[5], e[6]);
+    else if (e[0] === 's') Snd.play(e[1], e[2] === null ? undefined : e[2]);
+  }
+}
+// ---- server side: input mapping, lag-compensated fire, per-tick hook history
+const NETS = { k: 0, hist: [[], []], names: ['', ''] };
+function netRecord(k) {                                    // after every server tick: swing phase + "could fire" per hook
+  NETS.k = k;
+  for (let s = 0; s < 2; s++) {
+    const p = G.players[s], h = p && p.hook, H = NETS.hist[s];
+    const ok = !!(h && G.screen === 'play' && !G.paused && p.alive && !G.tug && h.state === 'swing' && p.frozen <= 0 && !G.timeUp && G.noFireT <= 0);
+    H.push({ k, ph: h ? h.phase : 0, ok });
+    if (H.length > NET_HIST + 10) H.shift();
+  }
+}
+function netNames() { G.players.forEach((p, i) => { const n = NETS.names[i]; if (n && p.name !== n) p.name = n; }); }
+function netStep() { update(STEP); netNames(); }
+// the hook is set to the phase it had at tick `at` and fired, then only this hook catches up `ticks` steps in the current world
+function fireBackdated(slot, phase, ticks, at) {
+  const p = G.players[slot]; if (!p) return null;
+  const h = p.hook;
+  if (G.screen !== 'play' || G.paused || G.tug || !p.alive) return null;
+  if (G.timeUp || G.noFireT > 0 || p.frozen > 0 || h.state !== 'swing') return null;
+  h.phase = phase; h.angle = HOOK.maxAngle * Math.sin(phase);
+  const ang = h.angle;
+  fireHook(p);
+  if (h.state !== 'extend') return null;
+  h.fireAt = at == null ? NETS.k : at;
+  for (let i = 0; i < ticks; i++) updateHook(p, STEP);
+  return { fireAt: h.fireAt, ang };
+}
+// one player action from the room controller -> the existing key handlers with that seat's own key codes
+function netInput(slot, a, arg) {
+  if (G.paused || slot < 0 || slot > 1) return null;
+  const k = PLAYER_CFG[slot].keys, sc = G.screen, p = G.players[slot];
+  switch (a) {
+    case 'fire': {
+      if (sc !== 'play' || !p) return null;
+      const h = p.hook, before = h.state, ang = h.angle;
+      handleKey(k.fire);
+      if (before === 'swing' && h.state === 'extend') { h.fireAt = NETS.k; return { fireAt: h.fireAt, ang }; }
+      return null;
+    }
+    case 'dyn': if (sc === 'play') handleKey(k.dyn); return null;
+    case 'left': case 'right': if (sc === 'select' || sc === 'shop') handleKey(k[a]); return null;
+    case 'ok': if (sc === 'select' || sc === 'shop') handleKey(k.buy); return null;
+    case 'back': if (sc === 'select') handleKey(k.ready); return null;
+    case 'ready': if (sc === 'shop') handleKey(k.ready); return null;
+    case 'pick': {
+      const i = arg | 0;
+      if (sc === 'select') { const st = G.sel[slot]; if (st && !st.ready && i >= 0 && i < CHARS.length) { st.idx = i; handleKey(k.buy); } }
+      else if (sc === 'shop') { const s = G.shop[slot]; if (s && p && p.alive && G.t - G.shopStartT >= 0.25 && i >= 0 && i <= s.offers.length) { s.sel = i; shopAction(slot, 'buy'); } }
+      return null;
+    }
+    case 'next': if (sc === 'results' && G.resultsT > 0.4) afterResults(); return null;
+  }
+  return null;
+}
+// a new game in the room: versus, fixed server seed, character select with each seat's last character
+function netEnterSelect(seed) {
+  RULE_VERSION = 2; R = RULESETS[2];
+  G.mode = 'versus'; G.paused = false; G.final = null; G.tug = null; G.players = []; G.items = []; G.hazards = []; G.event = null; G.banner = null;
+  G.meteors = []; G.bolts = []; G.shop = []; G.results = [];
+  window.__game.reseed(seed);
+  G.sel = [{ idx: G.chars[0] || 0, ready: false }, { idx: G.chars[1] == null ? 1 : G.chars[1], ready: false }]; G.selT = 0; G.screen = 'select';
+  NETS.hist = [[], []];
+}
+// ---------------------------------------------------------------------
+//  Online client (desktop only): lobby / waiting room (DOM), snapshot buffer + interpolation, own-hook prediction
+// ---------------------------------------------------------------------
+const NET_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const NET_ACTIONS = ['fire', 'dyn', 'left', 'right', 'ok', 'back', 'pick', 'ready', 'next', 'pause', 'resume', 'away', 'again', 'leave', 'endgame'];
+const NET_ERRORS = {
+  version: '游戏已更新,请刷新页面', room_not_found: '房间不存在', room_full: '房间已满', bad_seat: '座位已失效',
+  rate_limited: '操作太频繁', bad_message: '消息格式错误', server_full: '服务器已满,请稍后再试', origin: '连接被拒绝(网址不对)',
+};
+const NETC = {
+  on: false, ui: '', ws: null, connected: false, url: null, openAt: 0, you: -1, room: '', token: '', name: '', fast: false, welcomed: false,
+  seats: [], phase: '', pause: null, pauseAt: 0, closed: null,
+  buf: [], mirror: null, fxq: [], lastK: -1, arr: [], renderOff: null, D: 100, Dtarget: 100, lastDcalc: 0,
+  pongOff: null, pongs: [], rtt: 0, rttMin: 0,
+  pred: null, shown: {}, lastFire: null, fireLog: [], rx: 0, tx: 0, seq: 0, ack: 0,
+  lastMsgAt: 0, lastSnapAt: 0, lastPing: 0, backoff: 0, reconnectAt: 0, timer: null,
+  menuSel: 0, confirmLeave: 0, opp: null, rt: 0, frameAt: 0, hint: null, mine: { again: false, next: false },
+};
+const netGame = () => NETC.on && NETC.ui === 'game';
+const netNick = i => { const s = NETC.seats[i]; return (s && s.name) || PLAYER_CFG[i].name; };
+function netServerUrl() {
+  const m = /[?&]server=([^&#]+)/.exec(location.search);
+  if (m) return decodeURIComponent(m[1]);
+  if (location.protocol === 'http:' || location.protocol === 'https:') return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/online/ws';
+  return null;
+}
+const netCleanCode = s => String(s || '').toUpperCase().split('').filter(ch => NET_ALPHABET.includes(ch)).join('').slice(0, 6);
+function netInviteLink(code) { return location.href.split('#')[0] + '#room=' + code; }
+function netHashRoom() { const m = /[#&]room=([0-9A-Za-z]+)/.exec(location.hash || ''); return m ? netCleanCode(m[1]) : ''; }
+function netSetHash(code) { try { history.replaceState(null, '', location.href.split('#')[0] + (code ? '#room=' + code : '')); } catch (e) {} }
+function netHint(text, sec) { NETC.hint = { text, until: performance.now() + sec * 1000 }; }
+
+// ---- DOM: lobby, waiting room, messages (real <input>s so Chinese IMEs work); touch: the "use a computer" invite sheet
+let netDom = null;
+function netEl(id) { return document.getElementById(id); }
+function netBuildDom() {
+  if (netDom) return netDom;
+  netDom = document.createElement('div'); netDom.id = 'net'; netDom.className = 'net-hide';
+  netDom.innerHTML =
+    '<div class="net-card">' +
+    '<div class="net-title">联机对战</div>' +
+    '<div id="net-lobby">' +
+      '<label class="net-lbl" for="net-name">昵称(1–8 个字,可不填)</label>' +
+      '<input id="net-name" class="net-in" maxlength="8" autocomplete="off" spellcheck="false" placeholder="玩家1 / 玩家2">' +
+      '<button id="net-create" class="net-btn net-main">创建房间</button>' +
+      '<div class="net-or">或者输入对方给你的房间码</div>' +
+      '<div class="net-row"><input id="net-code" class="net-in net-codein" maxlength="8" autocomplete="off" spellcheck="false" placeholder="6 位房间码">' +
+      '<button id="net-join" class="net-btn">加入房间</button></div>' +
+      '<div id="net-err" class="net-err"></div>' +
+      '<button id="net-back" class="net-btn net-ghost">返回</button>' +
+      '<div class="net-note">联机对战需要两人都用<b>电脑</b>(键盘操作)。</div>' +
+    '</div>' +
+    '<div id="net-wait">' +
+      '<div class="net-lbl">房间码</div><div id="net-code-big" class="net-big"></div>' +
+      '<div class="net-row"><input id="net-link" class="net-in net-link" readonly><button id="net-copy" class="net-btn net-main">复制邀请链接</button></div>' +
+      '<div id="net-copied" class="net-ok"></div>' +
+      '<div class="net-note">联机对战 · 请让对方<b>在电脑上</b>打开链接</div>' +
+      '<div id="net-seats" class="net-seats"></div>' +
+      '<button id="net-leave" class="net-btn net-ghost">离开房间</button>' +
+    '</div>' +
+    '<div id="net-msg"><div id="net-msgtext" class="net-msgtext"></div>' +
+      '<div class="net-row net-center"><button id="net-refresh" class="net-btn net-main">刷新</button><button id="net-home" class="net-btn">返回主菜单</button></div></div>' +
+    '</div>';
+  document.body.appendChild(netDom);
+  netEl('net-create').onclick = () => netStart('create');
+  netEl('net-join').onclick = () => netStart('join');
+  netEl('net-back').onclick = () => netExit();
+  netEl('net-leave').onclick = () => netLeave();
+  netEl('net-home').onclick = () => netExit();
+  netEl('net-refresh').onclick = () => { try { location.reload(); } catch (e) {} };
+  netEl('net-copy').onclick = () => netCopy(netEl('net-link'), netEl('net-copied'));
+  const code = netEl('net-code');
+  code.addEventListener('input', () => { const v = netCleanCode(code.value); if (v !== code.value) code.value = v; });
+  for (const id of ['net-name', 'net-code']) netEl(id).addEventListener('keydown', e => { if (e.key === 'Enter') netStart(id === 'net-code' || netEl('net-code').value ? 'join' : 'create'); });
+  return netDom;
+}
+function netCopy(input, note) {
+  const text = input.value;
+  const fail = () => { try { input.focus(); input.select(); } catch (e) {} note.textContent = '请按 Ctrl+C 复制'; };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => { note.textContent = '已复制,发给对方吧'; }, fail);
+    else fail();
+  } catch (e) { fail(); }
+}
+function netShow(view) {                      // view: 'lobby' | 'wait' | 'msg' | null
+  const d = netBuildDom();
+  d.className = view ? 'net-show' : 'net-hide';
+  for (const v of ['lobby', 'wait', 'msg']) netEl('net-' + v).style.display = v === view ? '' : 'none';
+}
+function netMessage(text, refresh) {
+  netShow('msg'); netEl('net-msgtext').textContent = text;
+  netEl('net-refresh').style.display = refresh ? '' : 'none';
+}
+function netRenderSeats() {
+  if (!netDom) return;
+  netEl('net-seats').innerHTML = [0, 1].map(i => {
+    const s = NETC.seats[i], col = i ? '#ff8a84' : '#6fb0ff';
+    const st = !s ? '<span class="net-dim">等待加入…</span>' : s.online ? '<span class="net-on">在线</span>' : '<span class="net-off">离线</span>';
+    const nm = s ? (s.name || PLAYER_CFG[i].name) : '';
+    return `<div class="net-seat"><span style="color:${col}">玩家${i + 1}</span> <span class="net-nm"></span> ${st}${i === NETC.you ? ' <span class="net-you">你</span>' : ''}</div>`.replace('<span class="net-nm"></span>', '<span class="net-nm">' + nm.replace(/[<>&"]/g, '') + '</span>');
+  }).join('');
+}
+// desktop: "联机" on the main menu (or the O key)
+function netOpenLobby(code) {
+  if (G.touchUI) { netHint('联机对战需在电脑上进行', 2.5); return; }
+  const url = netServerUrl();
+  if (!url) { netHint('联机需要通过网址打开游戏', 2.5); return; }
+  NETC.url = url; NETC.on = true; NETC.ui = 'lobby';
+  netShow('lobby');
+  netEl('net-err').textContent = '';
+  const nm = lsGet('goldminer.online.name'); netEl('net-name').value = nm || '';
+  netEl('net-code').value = code || '';
+  setTimeout(() => { try { netEl('net-name').focus(); } catch (e) {} }, 0);
+}
+function netStart(kind) {
+  if (NETC.ws) return;
+  const name = Array.from(netEl('net-name').value.trim()).slice(0, 8).join('');
+  lsSet('goldminer.online.name', name);
+  NETC.name = name;
+  if (kind === 'join') {
+    const code = netCleanCode(netEl('net-code').value);
+    if (code.length !== 6) { netEl('net-err').textContent = '请输入 6 位房间码'; return; }
+    NETC.room = code;
+  }
+  netEl('net-err').textContent = '正在连接…';
+  const first = kind === 'create' ? { t: 'create', proto: NET_PROTO, build: NET_BUILD, name } : { t: 'join', proto: NET_PROTO, build: NET_BUILD, name, room: NETC.room };
+  netOpen(() => first);
+}
+function netResumeMsg() { return { t: 'resume', proto: NET_PROTO, build: NET_BUILD, room: NETC.room, seat: NETC.token }; }
+// back to the main menu from anywhere in the online flow
+function netExit() {
+  netDrop();
+  Object.assign(NETC, { on: false, ui: '', you: -1, room: '', token: '', seats: [], phase: '', pause: null, closed: null, welcomed: false, buf: [], mirror: null, fxq: [], pred: null, renderOff: null, reconnectAt: 0, backoff: 0, mine: { again: false, next: false } });
+  netShow(null); netSetHash('');
+  G.screen = 'start'; G.players = []; G.items = []; G.paused = false; G.tug = null; G.final = null; G.banner = null; G.particles = []; G.texts = []; G.bolts = []; G.meteors = []; G.hazards = []; G.event = null;
+  G.shake = 0; G.zoomT = 0; G.hitStop = 0; Snd.setPaused(false);
+  loadMenuMode(); G.mode = MENU_ORDER[G.menuMode] || 'versus';
+  try { cv.focus(); } catch (e) {}
+}
+function netLeave() {
+  netSend({ t: 'in', s: ++NETC.seq, a: 'leave' });
+  if (NETC.room) try { localStorage.removeItem('goldminer.online.' + NETC.room); } catch (e) {}
+  setTimeout(netExit, 60);
+}
+function netDrop() {                          // close the socket without triggering a reconnect
+  const ws = NETC.ws; NETC.ws = null; NETC.connected = false;
+  if (ws) { ws.onclose = ws.onmessage = ws.onerror = ws.onopen = null; try { ws.close(); } catch (e) {} }
+}
+
+// ---- connection
+function netSend(o) {
+  const ws = NETC.ws; if (!ws || ws.readyState !== 1) return false;
+  const s = JSON.stringify(o); NETC.tx += s.length; ws.send(s); return true;
+}
+function netOpen(first) {
+  let ws;
+  try { ws = new WebSocket(NETC.url); } catch (e) { netFail('连接服务器失败'); return; }
+  NETC.ws = ws; NETC.connected = false; NETC.openAt = performance.now();
+  ws.onopen = () => { if (NETC.ws !== ws) return; NETC.lastMsgAt = performance.now(); netSend(first()); netPing(); };
+  ws.onmessage = ev => {
+    if (NETC.ws !== ws) return;
+    const data = typeof ev.data === 'string' ? ev.data : '';
+    NETC.rx += data.length; NETC.lastMsgAt = performance.now();
+    let m; try { m = JSON.parse(data); } catch (e) { return; }
+    netMsg(m);
+  };
+  ws.onclose = () => { if (NETC.ws !== ws) return; NETC.ws = null; NETC.connected = false; netLost(); };
+  ws.onerror = () => {};
+  if (!NETC.timer) NETC.timer = setInterval(netHousekeep, 250);
+}
+function netFail(text) {                      // could not create / join: back to the lobby with a message
+  netDrop();
+  if (NETC.ui === 'lobby') netEl('net-err').textContent = text;
+  else { NETC.ui = 'msg'; netMessage(text, false); }
+}
+function netLost() {
+  if (!NETC.on) return;
+  if (!NETC.token || NETC.closed) { if (!NETC.token) netFail('连接服务器失败,请稍后再试'); return; }
+  const steps = [500, 1000, 2000, 4000];
+  NETC.reconnectAt = performance.now() + steps[Math.min(NETC.backoff, steps.length - 1)]; NETC.backoff++;
+  NETC.pred = null;
+}
+function netPing() { NETC.lastPing = performance.now(); netSend({ t: 'ping', c: Math.round(performance.now() * 100) / 100 }); }
+function netHousekeep() {
+  if (!NETC.on) { if (NETC.timer) { clearInterval(NETC.timer); NETC.timer = null; } return; }
+  const now = performance.now(), ws = NETC.ws;
+  if (ws && ws.readyState === 1) {
+    if (now - NETC.lastPing >= 2000) netPing();
+    if (now - NETC.lastMsgAt > 5000) { netDrop(); netLost(); }                      // 5 s of silence: assume the connection is dead
+  } else if (ws && ws.readyState === 0 && now - NETC.openAt > 5000) { netDrop(); netLost(); }
+  else if (!ws && NETC.reconnectAt && now >= NETC.reconnectAt) { NETC.reconnectAt = 0; netOpen(netResumeMsg); }
+  if (now - NETC.lastDcalc >= 1000) netCalcD(now);
+}
+function netStoreSeat() { lsSet('goldminer.online.' + NETC.room, JSON.stringify({ seat: NETC.token, you: NETC.you })); }
+function netMsg(m) {
+  switch (m.t) {
+    case 'welcome':
+      NETC.you = m.you; NETC.room = m.room; NETC.token = m.seat; NETC.fast = !!m.fast; NETC.connected = true; NETC.welcomed = true; NETC.backoff = 0;
+      NETC.buf = []; NETC.mirror = null; NETC.fxq = []; NETC.pred = null; NETC.arr = []; NETC.renderOff = null;
+      netStoreSeat(); netSetHash(NETC.room);
+      break;
+    case 'room': netRoom(m); break;
+    case 'snap': netSnap(m); break;
+    case 'pong': {
+      const now = performance.now(), rtt = Math.max(0, now - m.c);
+      NETC.pongs.push({ rtt, off: m.k + rtt / 2 * NET_TICK / 1000 - now * NET_TICK / 1000 }); if (NETC.pongs.length > 10) NETC.pongs.shift();
+      const best = NETC.pongs.reduce((a, b) => (b.rtt < a.rtt ? b : a));
+      NETC.rtt = rtt; NETC.rttMin = best.rtt;
+      if (NETC.pongOff === null || Math.abs(best.off - NETC.pongOff) > 30) NETC.pongOff = best.off;
+      else NETC.pongOff += clamp(best.off - NETC.pongOff, -0.6, 0.6);                    // gentle: at most 0.6 tick per pong (2 s)
+      break;
+    }
+    case 'error': netError(m); break;
+  }
+}
+function netError(m) {
+  const txt = NET_ERRORS[m.code] || '连接出错';
+  if (m.code === 'version') { NETC.closed = 'version'; netDrop(); NETC.ui = 'msg'; netMessage('游戏已更新,请刷新页面', true); return; }
+  if (m.code === 'bad_seat' && NETC.welcomed) { NETC.closed = 'taken'; netDrop(); NETC.ui = 'msg'; netMessage('已在其他页面打开这个房间', false); return; }
+  if (m.code === 'bad_message') return;
+  if (NETC.token && (m.code === 'room_not_found' || m.code === 'bad_seat')) {           // resume failed: the room or seat is gone
+    try { localStorage.removeItem('goldminer.online.' + NETC.room); } catch (e) {}
+    NETC.closed = 'gone'; netDrop(); NETC.ui = 'msg'; netMessage(m.code === 'room_not_found' ? '房间已不存在' : '座位已失效', false); return;
+  }
+  netFail(m.code === 'rate_limited' ? `操作太频繁,请 ${m.retry || 60} 秒后再试` : txt);
+}
+function netRoom(m) {
+  NETC.seats = m.seats || [];
+  NETC.phase = m.phase;
+  if (m.pause && !NETC.pause) NETC.menuSel = 0;
+  NETC.pause = m.pause || null; NETC.pauseAt = performance.now();
+  if (!NETC.pause) NETC.confirmLeave = 0;
+  if (m.phase === 'closed') {
+    NETC.closed = m.reason || 'left'; netDrop();
+    try { localStorage.removeItem('goldminer.online.' + NETC.room); } catch (e) {}
+    NETC.ui = 'msg'; netMessage(m.reason === 'timeout' ? '对方已离开(超时未回来)' : '对方已离开', false);
+    return;
+  }
+  if (m.phase === 'waiting') {
+    NETC.ui = 'wait'; netShow('wait');
+    netEl('net-code-big').textContent = NETC.room; netEl('net-link').value = netInviteLink(NETC.room);
+    netRenderSeats();
+  } else if (m.phase === 'game') {
+    if (NETC.ui !== 'game') { NETC.ui = 'game'; netShow(null); try { cv.focus(); } catch (e) {} }
+  }
+  if (NETC.you >= 0 && NETC.seats[NETC.you]) NETC.mine.again = !!NETC.seats[NETC.you].again;
+}
+function netSnap(m) {
+  const now = performance.now();
+  if (m.full) NETC.mirror = m.d;
+  else if (NETC.mirror) NETC.mirror = netPatch(NETC.mirror, m.d);
+  else return;
+  NETC.lastK = m.k; NETC.lastSnapAt = now;
+  NETC.buf.push({ k: m.k, S: NETC.mirror });
+  if (m.fx && m.fx.length) NETC.fxq.push({ k: m.k, fx: m.fx });
+  // arrival clock: the least-delayed snapshot of the last 3 s defines "now" on the server's tick line as seen from here
+  NETC.arr.push({ t: now, o: m.k - now * NET_TICK / 1000 });
+  while (NETC.arr.length && NETC.arr[0].t < now - 3000) NETC.arr.shift();
+  const best = NETC.arr.reduce((a, b) => Math.max(a, b.o), -Infinity);
+  if (NETC.renderOff === null || m.full || Math.abs(best - NETC.renderOff) > 30) NETC.renderOff = best;
+  NETC.offTarget = best;
+  if (m.fire) for (const f of m.fire) if (f.p === NETC.you) {
+    const shown = NETC.shown[f.seq];
+    const rec = { shownAngle: shown == null ? null : shown, serverAngle: Math.round(f.ang * 180 / Math.PI * 1000) / 1000, fireAt: f.fireAt, seq: f.seq, back: f.back };
+    NETC.lastFire = rec; NETC.fireLog.push(rec); if (NETC.fireLog.length > 400) NETC.fireLog.shift();
+    delete NETC.shown[f.seq];
+    if (NETC.pred && NETC.pred.seq === f.seq) { NETC.pred.confirmed = true; NETC.pred.fireAt = f.fireAt; }
+  }
+  if (typeof m.ack === 'number') {
+    NETC.ack = m.ack;
+    if (NETC.pred && !NETC.pred.confirmed && m.ack >= NETC.pred.seq) NETC.pred = null;            // processed, but the server did not fire
+  }
+  const keep = NETC.rt - 90;                                                                     // ~1.5 s of history
+  while (NETC.buf.length > 2 && NETC.buf[1].k < keep) NETC.buf.shift();
+}
+// interpolation delay D = clamp(2 x snapshot interval + 2 x p95 arrival jitter, 66, 250) ms, recomputed every second
+function netCalcD(now) {
+  NETC.lastDcalc = now;
+  if (NETC.arr.length < 5) return;
+  const best = NETC.arr.reduce((a, b) => Math.max(a, b.o), -Infinity);
+  const jit = NETC.arr.map(a => (best - a.o) * 1000 / NET_TICK).sort((a, b) => a - b);
+  const p95 = jit[Math.min(jit.length - 1, Math.floor(jit.length * 0.95))];
+  NETC.Dtarget = clamp(2 * 1000 / NET_SNAP + 2 * p95, 66, 250);
+  NETC.jitter = p95;
+}
+// ---- picture: G is rebuilt every frame from the snapshot buffer (interpolated between the two snapshots around the render tick)
+function netCfg(S, id) { return S.mode === 'solo' ? SOLO_CFG : PLAYER_CFG[id]; }
+function netMaterialize(S) {                  // snapshot -> G (fresh objects; the buffer itself is never modified)
+  for (const k of NET_SCALARS) if (k !== 'gt') G[k] = S[k];
+  for (const k of NET_OBJS) G[k] = S[k];
+  const byId = new Map(), dt = G.t - (S.gt || 0);
+  G.items = S.items.map(I => { const it = Object.assign({}, I); if (I.born != null) it.born = I.born + dt; byId.set(it.id, it); return it; });
+  for (const it of G.items) if (it.stuck) it.stuck = it.stuck.map(id => byId.get(id)).filter(Boolean);
+  G.players = S.players.map(P => {
+    const cfg = netCfg(S, P.id), p = Object.assign({}, P, { cfg, color: cfg.color, dark: cfg.dark, x: cfg.x, mx: cfg.x - (cfg.id === 0 ? 1 : -1) * 50, dir: cfg.id === 0 ? 1 : -1 });
+    if (S.mode === 'solo') { p.mx = cfg.x - 50; p.dir = 1; }
+    p.hook = Object.assign({}, P.hook, { item: byId.get(P.hook.item) || null });
+    return p;
+  });
+  G.hazards = S.hazards.map(h => Object.assign({}, h));
+  G.tug = S.tug && byId.get(S.tug.item) ? Object.assign({}, S.tug, { item: byId.get(S.tug.item) }) : null;
+  G.meteors = (S.meteors || []).map(m => Object.assign({}, m));
+  G.banner = S.banner ? Object.assign({}, S.banner) : null;
+  G.event = S.event ? Object.assign({}, S.event) : null;
+}
+const nlerp = (a, b, k) => (typeof a === 'number' && typeof b === 'number' ? a + (b - a) * k : a);
+function netBlend(A, B, k) {                  // G already holds A; move continuous values toward B
+  if (A.screen !== B.screen || A.round !== B.round) return;
+  for (const f of ['time', 'playT', 'introT', 'resultsT', 'overtime', 'zoomT', 'dispTeam']) G[f] = nlerp(A[f], B[f], k);
+  const bi = new Map(B.items.map(I => [I.id, I]));
+  for (const it of G.items) {
+    const b = bi.get(it.id); if (!b || b.grabbedBy !== it.grabbedBy || b.dead !== it.dead) continue;
+    it.x = nlerp(it.x, b.x, k); it.y = nlerp(it.y, b.y, k); it.phase = nlerp(it.phase, b.phase, k);
+  }
+  G.players.forEach((p, i) => {
+    const q = B.players[i]; if (!q) return;
+    p.frozen = nlerp(p.frozen, q.frozen, k); p.disp = nlerp(p.disp, q.disp, k); p.shieldFlash = nlerp(p.shieldFlash, q.shieldFlash, k);
+    const h = p.hook, hb = q.hook;
+    if (h.state !== hb.state || (h.item ? h.item.id : -1) !== hb.item) return;
+    if (h.state === 'swing') { h.phase = nlerp(h.phase, hb.phase, k); h.angle = HOOK.maxAngle * Math.sin(h.phase); }
+    else { h.len = nlerp(h.len, hb.len, k); h.angle = nlerp(h.angle, hb.angle, k); h.offx = nlerp(h.offx, hb.offx, k); h.offy = nlerp(h.offy, hb.offy, k); }
+  });
+  if (G.tug && B.tug && B.tug.item === G.tug.item.id) { G.tug.x = nlerp(G.tug.x, B.tug.x, k); G.tug.t = nlerp(G.tug.t, B.tug.t, k); }
+  if (B.hazards.length === G.hazards.length) G.hazards.forEach((h, i) => { h.t = nlerp(h.t, B.hazards[i].t, k); });
+  if (B.meteors && B.meteors.length === G.meteors.length) G.meteors.forEach((m, i) => { m.x = nlerp(m.x, B.meteors[i].x, k); m.y = nlerp(m.y, B.meteors[i].y, k); });
+  if (G.banner && B.banner) G.banner.t = nlerp(G.banner.t, B.banner.t, k);
+  if (G.event && B.event && G.event.id === B.event.id) G.event.fade = nlerp(G.event.fade, B.event.fade, k);
+}
+const netSwingRate = p => 2 * Math.PI / HOOK.swingPeriod * chv(p, 'swing', 1) * (G.event && G.event.id === 'wind' ? 1.5 : 1);
+const netExtendSpeed = p => HOOK.extend * (p.buffs.gear ? HOOK.gear : 1) * chv(p, 'extend', 1);
+function netExtrapolate(e) {                  // data ran out: continue the rules' obvious motion for at most 150 ms (9 ticks)
+  const s = e / NET_TICK;
+  if (G.screen !== 'play' || G.paused || G.hitStop > 0) return;
+  if (!G.timeUp) G.time = Math.max(0, G.time - s);
+  for (const p of G.players) {
+    if (!p.alive || p.frozen > 0) continue;
+    const h = p.hook;
+    if (h.state === 'swing') { h.phase += s * netSwingRate(p); h.angle = HOOK.maxAngle * Math.sin(h.phase); }
+    else if (h.state === 'extend') h.len += s * netExtendSpeed(p);
+  }
+}
+function netRenderTick(now) {
+  if (NETC.renderOff === null) return NETC.lastK;
+  return now * NET_TICK / 1000 + NETC.renderOff - NETC.D * NET_TICK / 1000;
+}
+function netApplyAt(rt) {                     // G <- picture at render tick rt; returns false when there is nothing to show yet
+  const b = NETC.buf; if (!b.length) return false;
+  let i = b.length - 1; while (i > 0 && b[i].k > rt) i--;
+  const A = b[i], B = b[i + 1];
+  netMaterialize(A.S);
+  if (B && rt > A.k) netBlend(A.S, B.S, (rt - A.k) / (B.k - A.k));
+  else if (!B && rt > A.k) netExtrapolate(Math.min(rt - A.k, 9));
+  G.paused = !!(G.paused || NETC.pause);
+  return true;
+}
+function netFrame(dt) {
+  const now = performance.now();
+  G.t += dt; NETC.frameAt = now;
+  if (NETC.renderOff !== null && NETC.offTarget != null) NETC.renderOff += clamp(NETC.offTarget - NETC.renderOff, -0.1 * dt * NET_TICK, 0.1 * dt * NET_TICK);   // slew <= 10%
+  NETC.D += clamp(NETC.Dtarget - NETC.D, -20 * dt, 20 * dt);
+  if (netGame() && NETC.buf.length) {
+    const rt = netRenderTick(now); NETC.rt = rt;
+    while (NETC.fxq.length && NETC.fxq[0].k <= rt) fxReplay(NETC.fxq.shift().fx);
+    if (NETC.fxq.length > 60) NETC.fxq.splice(0, NETC.fxq.length - 60);
+    netApplyAt(rt);
+    netPredict(now);
+    netEaseOpponent(now);
+  }
+  // local-only effect motion (particles, pop-up texts)
+  for (const q of G.particles) { q.x += q.vx * dt; q.y += q.vy * dt; q.vy += q.g * dt; q.rot += q.vr * dt; q.life -= dt; }
+  G.particles = G.particles.filter(q => q.life > 0);
+  for (const s of G.texts) { s.y -= (s.rise == null ? 16 : s.rise) * dt; s.life -= dt; }
+  G.texts = G.texts.filter(s => s.life > 0);
+}
+// own hook: shown extending at once; the server's picture takes over when the interpolated frame reaches its confirmed fire
+function netPredict(now) {
+  const pr = NETC.pred; if (!pr) return;
+  const p = G.players[NETC.you]; if (!p) { NETC.pred = null; return; }
+  const h = p.hook;
+  if (G.screen !== 'play' || G.paused) { NETC.pred = null; return; }
+  if (pr.confirmed && h.state !== 'swing' && h.fireAt === pr.fireAt) { NETC.pred = null; return; }   // hand-off
+  if (!pr.confirmed && now - pr.t0 > 500) { NETC.pred = null; return; }                             // never confirmed
+  let target = HOOK.minLen + Math.max(1, pr.speed * (now - pr.t0) / 1000);
+  while (!pr.stopped && pr.len < target) {
+    pr.len = Math.min(target, pr.len + 5);
+    const tx = p.x + Math.sin(pr.angle) * pr.len, ty = PIVOT_Y + Math.cos(pr.angle) * pr.len;
+    if (tx < 6 || tx > W - 6 || ty > H - 6) { pr.stopped = true; break; }
+    const R_ = HOOK.radius * (p.buffs.magnetHook ? 1.8 : 1);
+    for (const it of G.items) if (!it.dead && itemDist(it, { x: tx, y: ty }) < R_) { pr.stopped = true; break; }
+  }
+  h.state = 'extend'; h.angle = pr.angle; h.len = pr.len; h.item = null;
+}
+function netEaseOpponent(now) {               // the other hook may jump forward (its owner's lag compensation): 80 ms ease
+  const o = G.players[1 - NETC.you]; if (!o) return;
+  const h = o.hook, prev = NETC.opp;
+  if (prev && prev.state === 'swing' && h.state === 'extend' && h.len - HOOK.minLen > 20 && !NETC.oppEase) NETC.oppEase = { t0: now, from: HOOK.minLen };
+  const e = NETC.oppEase;
+  if (e) {
+    const k = (now - e.t0) / 80;
+    if (k >= 1 || h.state !== 'extend') NETC.oppEase = null;
+    else h.len = lerp(e.from, h.len, k * (2 - k));
+  }
+  NETC.opp = { state: h.state };
+}
+
+// ---- keys while online (the DOM lobby keeps its own keys; M / V stay local)
+function netAct(a, extra) { const o = Object.assign({ t: 'in', s: ++NETC.seq, a }, extra || {}); netSend(o); return o.s; }
+function netFire() {
+  const now = performance.now();
+  if (NETC.buf.length) netApplyAt(netRenderTick(now));
+  const rt = netRenderTick(now), p = G.players[NETC.you]; if (!p) return;
+  const h = p.hook;
+  if (G.tug || NETC.pred || h.state !== 'swing' || !p.alive || p.frozen > 0 || G.timeUp || G.noFireT > 0 || G.paused) { netAct('fire', { at: Math.round(rt * 1000) / 1000 }); return; }
+  const seq = netAct('fire', { at: Math.round(rt * 1000) / 1000 });
+  NETC.shown[seq] = Math.round(h.angle * 180 / Math.PI * 1000) / 1000;
+  NETC.pred = { seq, t0: now, at: rt, angle: h.angle, len: HOOK.minLen, speed: netExtendSpeed(p), stopped: false, confirmed: false, fireAt: null };
+}
+function netKey(code) {
+  if (code === 'KeyM') { Snd.muted = !Snd.muted; return; }
+  if (code === 'KeyV') { setReduceFx(!reduceFxOn); G.toast = reduceFxOn ? 'V 特效:关' : 'V 特效:开'; G.toastT = 1.5; return; }
+  if (!netGame() || !NETC.connected) return;
+  const sc = G.screen, pz = NETC.pause, ok = code === 'Space' || code === 'Enter' || code === 'NumpadEnter';
+  const up = code === 'KeyW' || code === 'ArrowUp', down = code === 'KeyS' || code === 'ArrowDown';
+  const left = code === 'KeyA' || code === 'ArrowLeft', right = code === 'KeyD' || code === 'ArrowRight';
+  if (pz) {
+    if (pz.reason === 'offline') { if (code === 'KeyE' && pz.endOffer) netAct('endgame'); return; }
+    if (pz.resumeAt != null) return;                                      // counting down
+    if (up || down) { NETC.menuSel = 1 - NETC.menuSel; NETC.confirmLeave = 0; Snd.play('select'); return; }
+    if (code === 'KeyP' || code === 'Escape') { if (NETC.confirmLeave) NETC.confirmLeave = 0; else netAct('resume'); return; }
+    if (ok) {
+      if (NETC.menuSel === 0) netAct('resume');
+      else if (NETC.confirmLeave) netLeave(); else NETC.confirmLeave = 1;
+    }
+    return;
+  }
+  if ((code === 'KeyP' || code === 'Escape') && (sc === 'intro' || sc === 'play')) { netAct('pause'); return; }
+  switch (sc) {
+    case 'select': if (left) netAct('left'); else if (right) netAct('right'); else if (down || ok) netAct('ok'); else if (up) netAct('back'); break;
+    case 'play': if (down) netFire(); else if (up) netAct('dyn'); break;
+    case 'results': if (down || ok) { netAct('next'); } break;
+    case 'shop': if (left) netAct('left'); else if (right) netAct('right'); else if (down || ok) netAct('ok'); else if (up) netAct('ready'); break;
+    case 'final': if (ok) netAct('again'); else if (code === 'Escape') netLeave(); break;
+  }
+}
+// keydown filter: returns true when the online UI consumed the event
+function netKeyHook(e) {
+  const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+  if (netDom && netDom.className === 'net-show') {
+    if (inField) return true;                                              // typing in the lobby
+    if (e.code === 'Escape' && NETC.ui === 'lobby') netExit();
+    return true;
+  }
+  if (touchInvite && touchInvite.style.display !== 'none') return true;
+  if (!NETC.on) return false;
+  if (BLOCK.has(e.code) || e.code === 'KeyP') e.preventDefault();
+  Snd.init();
+  if (!e.repeat) netKey(e.code);
+  return true;
+}
+// tab hidden: tell the server at once (it pauses both players) instead of waiting for a timeout
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && netGame() && NETC.connected && !NETC.pause && (G.screen === 'intro' || G.screen === 'play')) netAct('away');
+});
+
+// ---- touch devices: online play needs a computer (no WebSocket is ever opened here)
+let touchInvite = null;
+function netTouchInvite(code) {
+  if (!touchInvite) {
+    touchInvite = document.createElement('div'); touchInvite.id = 'net-touch';
+    touchInvite.innerHTML = '<div class="net-card net-tcard"><div class="net-title">联机对战需在电脑上进行</div>' +
+      '<div class="net-note">请在电脑浏览器打开这个链接:</div><div id="net-tlink" class="net-tlink"></div><div id="net-tcopied" class="net-ok"></div>' +
+      '<div class="net-row net-center"><button id="net-tcopy" class="net-btn net-main">复制链接</button><button id="net-tsolo" class="net-btn">玩单人模式</button></div></div>';
+    document.body.appendChild(touchInvite);
+    const lk = { value: '' };
+    document.getElementById('net-tcopy').onclick = () => { lk.value = document.getElementById('net-tlink').textContent; netCopy({ value: lk.value, focus() {}, select() { try { const r = document.createRange(); r.selectNodeContents(document.getElementById('net-tlink')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); } catch (e) {} } }, document.getElementById('net-tcopied')); };
+    document.getElementById('net-tsolo').onclick = () => { touchInvite.style.display = 'none'; netSetHash(''); G.screen = 'start'; };
+    for (const ev of ['pointerdown', 'touchstart', 'touchend']) touchInvite.addEventListener(ev, e => e.stopPropagation());
+  }
+  document.getElementById('net-tlink').textContent = netInviteLink(code);
+  touchInvite.style.display = 'flex';
+}
+// page opened from an invitation link (#room=CODE): desktop -> lobby with the code filled in (or straight back to a stored seat)
+function netBoot() {
+  const code = netHashRoom(); if (!code) return;
+  if (G.touchUI) { netTouchInvite(code); return; }
+  let rec = null; try { rec = JSON.parse(lsGet('goldminer.online.' + code)); } catch (e) {}
+  netOpenLobby(code);
+  if (NETC.on && rec && rec.seat) {                                        // refresh / reopen: resume the seat
+    NETC.room = code; NETC.token = rec.seat; NETC.you = rec.you;
+    netEl('net-err').textContent = '正在回到房间…';
+    netOpen(netResumeMsg);
+  }
+}
+
+// ---- canvas overlays during an online game
+function drawNetOverlay(c) {
+  const now = performance.now();
+  if (NETC.connected && now - NETC.lastSnapAt > 1000) {                    // no snapshot for 1 s
+    rr(c, W - 170, 70, 160, 30, 10); c.fillStyle = 'rgba(120,30,20,0.9)'; c.fill(); c.lineWidth = 2; c.strokeStyle = '#ff9a7a'; c.stroke();
+    T(c, '网络不稳…', W - 90, 85, { size: 16, align: 'center', color: '#ffd0c0' });
+  }
+  if (/[?&]netdebug=1/.test(location.search)) {
+    const s = netStats();
+    T(c, `RTT ${Math.round(s.rtt)}ms · 插值 ${Math.round(s.interpDelayMs)}ms · 缓冲 ${s.bufferLen}`, W - 10, H - 34, { size: 13, align: 'right', color: '#9fe3ff', bold: false });
+  }
+  const pz = NETC.pause;
+  if (!NETC.connected) { netPanel(c, '正在重新连接…', '网络恢复后会自动回到原来的座位', null); return; }
+  if (!pz) return;
+  UI.btn('net-block', 0, 0, W, H, () => {});
+  const who = pz.by >= 0 ? netNick(pz.by) : '';
+  if (pz.resumeAt != null) {
+    const left = Math.max(0, (pz.resumeAt - NETC.rt) / NET_TICK);
+    dim(c, 0.45);
+    T(c, String(Math.max(1, Math.ceil(left))), W / 2, 330, { size: 140, align: 'center', color: '#ffe36b', stroke: '#7a2a08', sw: 14 });
+    T(c, '即将继续', W / 2, 430, { size: 30, align: 'center', color: '#fff', stroke: '#0c1030', sw: 6 });
+    return;
+  }
+  if (pz.reason === 'offline') {
+    const gone = Math.max(0, (pz.left || 0) - (now - NETC.pauseAt));
+    const mm = Math.floor(gone / 60000), ss = Math.floor(gone / 1000) % 60;
+    netPanel(c, pz.by === NETC.you ? '正在重新连接…' : `${who} 连接中断`, `正在等待重连… 剩余 ${mm}:${String(ss).padStart(2, '0')}`, null);
+    if (pz.endOffer && pz.by !== NETC.you) drawBtn(c, 'net-endgame', W / 2 - 150, 430, 300, 64, '结束对局 (E)', () => netAct('endgame'), { size: 26, fill: 'rgba(150,40,30,0.92)', stroke: '#ffb347' });
+    return;
+  }
+  netPanel(c, pz.reason === 'away' ? `${who} 切换到了其他窗口` : `${who} 暂停了游戏`, null, true);
+}
+function netPanel(c, title, sub, menu) {
+  dim(c, 0.62);
+  panel(c, W / 2 - 300, 170, 600, 360, { fill: 'rgba(20,24,52,0.95)', stroke: '#ffd23a', lw: 4 });
+  T(c, title, W / 2, 236, { size: 38, align: 'center', color: '#ffd23a', stroke: '#7a3a08', sw: 7 });
+  if (sub) T(c, sub, W / 2, 300, { size: 24, align: 'center', color: '#e6ecff', bold: false });
+  if (!menu) return;
+  const items = ['继续', NETC.confirmLeave ? '再按一次确认离开' : '离开房间'];
+  items.forEach((txt, i) => {
+    const y = 330 + i * 70, sel = NETC.menuSel === i;
+    rr(c, W / 2 - 190, y - 27, 380, 54, 12); c.fillStyle = sel ? 'rgba(255,210,58,0.28)' : 'rgba(255,255,255,0.06)'; c.fill();
+    c.lineWidth = sel ? 3 : 1.5; c.strokeStyle = sel ? '#ffd23a' : 'rgba(255,255,255,0.25)'; c.stroke();
+    T(c, txt, W / 2, y, { size: 26, align: 'center', color: i === 1 && NETC.confirmLeave ? '#ff9a8a' : sel ? '#fff' : '#cfe0ff' });
+    UI.btn('net-pause-' + i, W / 2 - 190, y - 27, 380, 54, () => { NETC.menuSel = i; if (i === 0) netAct('resume'); else if (NETC.confirmLeave) netLeave(); else NETC.confirmLeave = 1; });
+  });
+  T(c, 'W/S 选择    空格/回车 确认    P/Esc 继续(任一方都可以)', W / 2, 500, { size: 14, align: 'center', color: '#aab', bold: false });
+}
+function drawNetHint(c) {                     // centred two-second notice ("联机对战需在电脑上进行" etc.)
+  const h = NETC.hint; if (!h) return;
+  const left = h.until - performance.now(); if (left <= 0) { NETC.hint = null; return; }
+  const sz = fsz({ size: 26 }, 26);
+  c.save(); c.font = `bold ${sz}px ${FONT}`; const w = c.measureText(h.text).width + 60; c.restore();
+  rr(c, W / 2 - w / 2, 300, w, sz + 40, 16); c.fillStyle = 'rgba(16,22,52,0.95)'; c.fill(); c.lineWidth = 3; c.strokeStyle = '#ffd23a'; c.stroke();
+  T(c, h.text, W / 2, 300 + (sz + 40) / 2, { size: 26, align: 'center', color: '#ffe36b' });
+}
+function drawGlobe(c, x, y, r) {
+  c.save(); c.strokeStyle = '#bfe8ff'; c.lineWidth = 2;
+  c.beginPath(); c.arc(x, y, r, 0, 7); c.stroke();
+  c.beginPath(); c.ellipse(x, y, r * 0.45, r, 0, 0, 7); c.stroke();
+  c.beginPath(); c.moveTo(x - r, y); c.lineTo(x + r, y); c.moveTo(x - r * 0.85, y - r * 0.5); c.lineTo(x + r * 0.85, y - r * 0.5); c.moveTo(x - r * 0.85, y + r * 0.5); c.lineTo(x + r * 0.85, y + r * 0.5); c.stroke();
+  c.restore();
+}
+function netStats() {
+  return { connected: NETC.connected, you: NETC.you, room: NETC.room, rtt: NETC.rtt, rttMin: NETC.rttMin, offsetTicks: NETC.pongOff, renderOffset: NETC.renderOff,
+    interpDelayMs: NETC.D, interpTargetMs: NETC.Dtarget, jitterMs: NETC.jitter, bufferLen: NETC.buf.length, predActive: !!NETC.pred, lastSnapTick: NETC.lastK, renderTick: NETC.rt,
+    rxBytes: NETC.rx, txBytes: NETC.tx, lastFire: NETC.lastFire, fires: NETC.fireLog.slice(), ui: NETC.ui, pause: NETC.pause, seats: NETC.seats, phase: NETC.phase, closed: NETC.closed };
 }
 
 // debug hook for tests
@@ -4206,9 +5025,33 @@ window.__game = {
   safeInsets() { return Object.assign({}, insets); },
   advance(sec) { const n = Math.round(sec / STEP); for (let i = 0; i < n; i++) update(STEP); },
   generateLevel, levelWorth, hookTip, endRound, makeItem, explodeTNT, startGame, startRound, selectKey, reshuffle, spawnMeteor, tugPress, resolveTug, startTug, rollEvent, slabState, ventState, slabBlocks, plumeAt, burnHook, occFor, CHARS, EVENTS, THEMES, themeOf, pauseGame, resumeGame, loadBest, saveBest, deliver, finishGame, afterResults, shopAction, openShop, curTarget,
+  // ---- phase 4 (online versus).  Server half: host / step / input / fireBackdated / record / hookHistory / snapshot / fxDrain / enterSelect / setNames.
+  // Client half: apply / connect / stats.  `build` = FNV-1a 64 of this script.
+  net: {
+    build: NET_BUILD, proto: NET_PROTO, fnv64, PLAYER_CFG,
+    host() { fxSink = []; },                                              // server mode: effects go to the collector
+    step: netStep, input: netInput, fireBackdated, record: netRecord, hookHistory: s => NETS.hist[s].map(e => Object.assign({}, e)),
+    snapshot: () => netSnapshot(), fxDrain, enterSelect: netEnterSelect,
+    setNames(n) { NETS.names = [String(n[0] || ''), String(n[1] || '')]; netNames(); },
+    patch: netPatch,
+    apply(msg) {                                                          // a snapshot message: live -> buffered; otherwise drawn as is
+      if (netGame()) { netSnap(msg); return NETC.mirror; }
+      NETC.mirror = msg.full ? msg.d : netPatch(NETC.mirror, msg.d);
+      netMaterialize(NETC.mirror); return NETC.mirror;
+    },
+    connect(o) {                                                          // programmatic create / join (the lobby buttons do the same)
+      o = o || {}; NETC.url = o.url || netServerUrl(); if (!NETC.url) return false;
+      NETC.on = true; NETC.ui = 'lobby'; netShow('lobby'); NETC.name = o.name || '';
+      if (o.room) NETC.room = netCleanCode(o.room);
+      const first = o.room ? { t: 'join', proto: NET_PROTO, build: NET_BUILD, name: NETC.name, room: NETC.room } : { t: 'create', proto: NET_PROTO, build: NET_BUILD, name: NETC.name };
+      netOpen(() => first); return true;
+    },
+    stats: netStats,
+  },
 };
 
 resize();
+netBoot();
 requestAnimationFrame(frame);
 })();
 </script>

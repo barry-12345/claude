@@ -94,6 +94,8 @@ async function t02(browser) {
 }
 
 // ---------- T-03 / T-04 versus and co-op are gone ----------
+// (phase 4 adds one grey "联机对战" button whose only action is the hint "联机对战需在电脑上进行"; SPEC-phase4-online s2.1-9)
+const ONLINE_HINT = new Set(['联机对战', '联机对战需在电脑上进行']);
 async function t03_04(browser) {
   const page = await tPage(browser, { init: `localStorage.setItem('goldminer.mode', 'versus')`, query: 'seed=1' });
   await page.addInitScript(TEXT_SPY).catch(() => {});
@@ -102,7 +104,7 @@ async function t03_04(browser) {
   const modeIds = ids.filter(i => i.startsWith('mode-'));
   await page.evaluate(TEXT_SPY);
   const tx = await texts(page);
-  const bad = tx.filter(q => /对战|合作|VS/.test(q.t)).map(q => q.t);
+  const bad = tx.filter(q => /对战|合作|VS/.test(q.t) && !ONLINE_HINT.has(q.t)).map(q => q.t);   // phase 4: the grey "联机对战" hint button is allowed
   const before = await G(page, () => ({ s: __game.G.screen, m: __game.G.mode, mm: __game.G.menuMode }));
   for (const [gx, gy] of [[639, 124], [1045, 124]]) { await tapG(page, gx, gy); await sleep(150); }   // where the desktop versus / co-op cards are
   const after = await G(page, () => ({ s: __game.G.screen, m: __game.G.mode, mm: __game.G.menuMode, ls: localStorage.getItem('goldminer.mode') }));
@@ -125,8 +127,8 @@ async function t03_04(browser) {
   const sel = await G(p2, () => ({ s: __game.G.screen, m: __game.G.mode }));
   await p2.keyboard.press('ArrowRight'); await p2.keyboard.press('KeyS'); await wait(p2, () => __game.G.screen === 'intro', null, 3000);
   const run = await G(p2, () => ({ n: __game.G.players.length, m: __game.G.mode }));
-  report('T-04', log.every(l => l.startsWith('0/') && l.endsWith('/start')) && !t4.some(q => /对战|合作/.test(q.t)) && sel.s === 'select' && sel.m === 'solo' && run.n === 1 && run.m === 'solo' && p2.errors.length === 0,
-    `iPhone 13 + keyboard: Digit2, Digit3, ArrowRight, KeyD, Numpad2, Numpad3 leave menuMode/mode/screen at [${[...new Set(log)]}]; Space -> ${sel.s}, G.mode=${sel.m}; keyboard-started game has ${run.n} player (${run.m}); versus/co-op text drawn=${t4.some(q => /对战|合作/.test(q.t))}`);
+  report('T-04', log.every(l => l.startsWith('0/') && l.endsWith('/start')) && !t4.some(q => /对战|合作/.test(q.t) && !ONLINE_HINT.has(q.t)) && sel.s === 'select' && sel.m === 'solo' && run.n === 1 && run.m === 'solo' && p2.errors.length === 0,
+    `iPhone 13 + keyboard: Digit2, Digit3, ArrowRight, KeyD, Numpad2, Numpad3 leave menuMode/mode/screen at [${[...new Set(log)]}]; Space -> ${sel.s}, G.mode=${sel.m}; keyboard-started game has ${run.n} player (${run.m}); versus/co-op text drawn=${t4.some(q => /对战|合作/.test(q.t) && !ONLINE_HINT.has(q.t))}`);
   await p2.ctx.close();
 }
 

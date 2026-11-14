@@ -1,0 +1,13 @@
+{
+  "name": "goldminer-online",
+  "version": "1.0.0",
+  "private": true,
+  "description": "黄金矿工联机对战服务端:权威服务器,在 node:vm 中运行同一个 index.html 的游戏脚本",
+  "main": "src/server.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\""
+  },
+  "dependencies": { "ws": "8.22.0" }
+}
