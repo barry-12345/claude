@@ -4239,7 +4239,7 @@ let last = performance.now(), acc = 0, perfT = 0, perfN = 0, perfSkip = 0, perfB
 // level 1 = canvas resolution at most x1.5 of the CSS size, level 2 = x1 (only visual; ?perf=N forces a level and turns this off).
 // Measured (headless Chromium, 1728x1117 CSS px at DPR 2, CPU x4): canvas 3456x1944 -> 8 FPS, 1728x972 -> 18 FPS.
 const PERF_FORCE = /[?&]perf=([0-2])/.exec(location.search);
-let dpT = 0, dpSkip = 0; const dpBuf = [];
+let dpT = 0, dpSkip = 0, dpFast = 0, dpRaised = false, dpLocked = false; const dpBuf = [];
 function setPerfLevel(n, reason) {
   G.perfLevel = n;
   const want = n >= 2 ? 1 : n >= 1 ? 1.5 : 2;
@@ -4247,18 +4247,26 @@ function setPerfLevel(n, reason) {
   if (reason) G.dprReason = Object.assign({ level: n }, reason);
 }
 function perfDesktop(raw) {
-  if (G.screen !== 'play' || G.paused || document.hidden || raw > 0.5 || G.perfLevel >= 2 || (window.devicePixelRatio || 1) <= 1) { dpT = 0; dpBuf.length = 0; return; }
+  if (G.screen !== 'play' || G.paused || document.hidden || raw > 0.5 || (window.devicePixelRatio || 1) <= 1) { dpT = 0; dpBuf.length = 0; return; }
   if (dpSkip > 0) { dpSkip -= raw; return; }
   dpBuf.push(raw); dpT += raw;
   if (dpT < 2) return;
   const sorted = dpBuf.slice().sort((x, y) => x - y), med = sorted[sorted.length >> 1], p90 = sorted[Math.floor(sorted.length * 0.9)];
   dpT = 0; dpBuf.length = 0;
-  if (med > 0.02 || p90 > 0.034) {
+  const stat = { medianFrameMs: Math.round(med * 10000) / 10, p90FrameMs: Math.round(p90 * 10000) / 10 };
+  if ((med > 0.02 || p90 > 0.034) && G.perfLevel < 2) {
     let n = G.perfLevel + 1;
     if (n === 1 && (window.devicePixelRatio || 1) <= 1.5) n = 2;               // a x1.5 step would change nothing
-    setPerfLevel(n, { medianFrameMs: Math.round(med * 10000) / 10, p90FrameMs: Math.round(p90 * 10000) / 10 });
+    if (dpRaised) dpLocked = true;                                              // slow again after stepping back up: stay down for good
+    setPerfLevel(n, stat); dpFast = 0;
     dpSkip = 1;                                                                 // (the frames right after a resize are not representative)
-  }
+  } else if (G.perfLevel > 0 && !dpLocked && p90 < 0.018) {                     // three smooth windows in a row: one level back up
+    if (++dpFast >= 3) {
+      let n = G.perfLevel - 1;
+      if (n === 1 && (window.devicePixelRatio || 1) <= 1.5) n = 0;
+      dpRaised = true; dpFast = 0; setPerfLevel(n, Object.assign({ up: true }, stat)); dpSkip = 1;
+    }
+  } else dpFast = 0;
 }
 // FPS and the longest frame of the last second (shown with ?netdebug=1)
 const fstat = { fps: 0, maxMs: 0, buf: [] };
@@ -4268,8 +4276,9 @@ function frameStat(now, raw) {
   fstat.fps = fstat.buf.length; fstat.maxMs = Math.round(fstat.buf.reduce((m, f) => Math.max(m, f[1]), 0) * 1000);
 }
 function frame(now) {
-  // desktop: the game runs at a fixed 60 Hz, so on 120 Hz (ProMotion) screens every other drawing is wasted work: skip it
-  if (!G.touchUI && now - last < 12) { requestAnimationFrame(frame); return; }
+  // desktop: the game runs at a fixed 60 Hz, so on screens faster than ~105 Hz (120/144 Hz ProMotion) every other drawing is wasted:
+  // skip it.  90/100 Hz screens (10-11 ms) still draw every frame, so their frame intervals never look "slow" to perfDesktop
+  if (!G.touchUI && now - last < 9.5) { requestAnimationFrame(frame); return; }
   const raw = (now - last) / 1000;
   let dt = raw; last = now;
   if (dt > 0.25) dt = 0.25;

@@ -9,7 +9,7 @@ if (process.argv.includes('--wip')) process.env.GM_INDEX = require('path').join(
 const L = require('./lib');
 (async () => {
   const want = process.argv.slice(2).filter(a => a !== '--wip');
-  const suites = (want.includes('smoke') ? ['smoke'] : ['phase2', 'touch', 'logic', 'keys', 'shots', 'phase3', 'online', 'onlinesrv'].filter(s => !want.length || want.includes(s)));
+  const suites = (want.includes('smoke') ? ['smoke'] : ['phase2', 'touch', 'logic', 'keys', 'shots', 'phase3', 'online', 'onlinesrv', 'perfhz'].filter(s => !want.length || want.includes(s)));
   const browser = await L.launch();
   const t0 = Date.now();
   try {
