@@ -41,6 +41,8 @@ function loadConfig(env = process.env) {
     testHooks: env.ONLINE_TEST_HOOKS === '1' && env.NODE_ENV !== 'production',
     maxRooms: env.MAX_ROOMS ? +env.MAX_ROOMS : 20,
     maxConns: env.MAX_CONNS ? +env.MAX_CONNS : 100,
+    // per-IP limits (SPEC 2.3); only tests that run many browser contexts from one address raise them
+    limits: { connPerMin: 30, perIp: 8, createPerHour: 10, joinFailPerMin: 10, joinFailPerHour: 50 },
     log: env.ONLINE_LOG !== '0',
   };
 }
@@ -49,13 +51,14 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 
 function createServer(config = {}, deps = {}) {
   const cfg = Object.assign(loadConfig({}), config);
+  cfg.limits = Object.assign(loadConfig({}).limits, config.limits || {});
   const clock = deps.clock || realClock;
   const host = new SimHost(cfg.gameHtml, { fast: cfg.fast });
   const build = host.createGame().build;                        // the hash of the script the server runs (= what Caddy serves)
   const rooms = new Map(), conns = new Set(), perIp = new Map();
   const lim = {
-    conn: new WindowLimiter(30, MIN, clock), create: new WindowLimiter(10, HOUR, clock),
-    joinMin: new WindowLimiter(10, MIN, clock), joinHour: new WindowLimiter(50, HOUR, clock),
+    conn: new WindowLimiter(cfg.limits.connPerMin, MIN, clock), create: new WindowLimiter(cfg.limits.createPerHour, HOUR, clock),
+    joinMin: new WindowLimiter(cfg.limits.joinFailPerMin, MIN, clock), joinHour: new WindowLimiter(cfg.limits.joinFailPerHour, HOUR, clock),
   };
   const log = (...a) => { if (cfg.log) console.log(new Date().toISOString(), ...a); };
   const srv = { cfg, clock, host, rooms, conns, build, lim };
@@ -85,12 +88,13 @@ function createServer(config = {}, deps = {}) {
     if (req.method === 'POST' && parts[1] === 'drop') {
       const r = rooms.get(url.searchParams.get('room') || ''), slot = +(url.searchParams.get('slot') || 0), s = r && r.seats[slot];
       if (!s || !s.conn) return json(res, 404, { ok: false });
+      const at = { k: r.k, time: r.G.time, screen: r.G.screen };
       try { s.conn.ws._socket.destroy(); } catch (e) {}
-      return json(res, 200, { ok: true });
+      return json(res, 200, Object.assign({ ok: true }, at));
     }
     if (parts[1] === 'room' && parts[2]) {
       const r = rooms.get(parts[2]); if (!r) return json(res, 404, { error: 'room_not_found' });
-      if (req.method === 'GET' && parts[3] === 'state') return json(res, 200, Object.assign(r.info(), { state: r.snapshot(), final: plain(r.G.final) }));
+      if (req.method === 'GET' && parts[3] === 'state') return json(res, 200, Object.assign(r.info(), { state: r.snapshot(), final: plain(r.G.final), events: r.events.slice() }));
       if (req.method === 'POST' && parts[3] === 'seed') { const b = await readBody(req); if (!b || !Number.isInteger(b.seed)) return json(res, 400, { ok: false }); r.setSeed(b.seed); return json(res, 200, { ok: true, seed: b.seed }); }
       if (req.method === 'POST' && parts[3] === 'eval') {
         const b = await readBody(req); if (!b || typeof b.code !== 'string') return json(res, 400, { ok: false });
@@ -151,7 +155,7 @@ function createServer(config = {}, deps = {}) {
     // connection-level limits: answered with an error message, then closed
     let refuse = null;
     if (conns.size > cfg.maxConns) refuse = { t: 'error', code: 'server_full' };
-    else if (n > 8) refuse = { t: 'error', code: 'rate_limited', retry: 10 };
+    else if (n > cfg.limits.perIp) refuse = { t: 'error', code: 'rate_limited', retry: 10 };
     else { const r = lim.conn.hit(ip); if (!r.ok) refuse = { t: 'error', code: 'rate_limited', retry: r.retry }; }
     if (refuse) { srv.send(c, refuse); srv.closeConn(c, 1008, refuse.code); return; }
     ws.on('message', (data, isBinary) => {

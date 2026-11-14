@@ -4310,6 +4310,7 @@ function netSnapshot() {
   S.players = G.players.map(p => {
     const P = {}; for (const k of P_KEYS) P[k] = njson(p[k] === undefined ? null : p[k]);
     const H = {}; for (const k of H_KEYS) H[k] = njson(p.hook[k] === undefined ? null : p.hook[k]);
+    H.angle = Math.round(p.hook.angle * 1e5) / 1e5; H.phase = Math.round(p.hook.phase * 1e5) / 1e5;   // aim needs more than 1e-3 (0.06 deg)
     H.item = p.hook.item ? p.hook.item.id : -1;
     P.hook = H; return P;
   });
@@ -5047,6 +5048,8 @@ window.__game = {
       netOpen(() => first); return true;
     },
     stats: netStats,
+    mirror: () => NETC.mirror,                                            // tests: the latest snapshot this page holds
+    render() { render(); },                                               // tests: draw one frame now
   },
 };
 

@@ -27,7 +27,9 @@ class Room {
     this.fires = [];                           // fire confirmations for the next snapshot
     this.prevSnap = null; this.urgent = false; this.lastScreen = this.game.G.screen;
     this.stats = { tickMs: 0, ticks: 0 };
+    this.events = [];                          // recent pause / seat events with their tick (exposed by /__test/room/:code/state)
   }
+  event(ev) { this.events.push({ k: this.k, ev }); if (this.events.length > 60) this.events.shift(); }
   get G() { return this.game.G; }
   get net() { return this.game.net; }
 
@@ -71,6 +73,7 @@ class Room {
         if (!this.pause || this.pause.reason !== 'offline') {
           const prev = this.pause && this.pause.resumeAt == null ? this.pause : null;
           this.pause = { by: off, reason: 'offline', resumeAt: null, prev, endOffer: false };
+          this.event('pause:offline');
           if (!G.paused) this.game.g.pauseGame();
         } else this.pause.by = off;
       } else if (this.pause && this.pause.reason === 'offline') {
@@ -126,7 +129,7 @@ class Room {
   }
 
   // ---- input
-  push(conn, m) { this.queue.push({ conn, slot: conn.slot, m }); }
+  push(conn, m) { this.queue.push({ conn, slot: conn.slot, m }); if (m.a !== 'fire' && m.a !== 'dyn') this.event('in:' + m.a + ':' + conn.slot); }
   process(conn, slot, m, now) {
     const G = this.G, a = m.a, pz = this.pause, seat = this.seats[slot];
     if (conn) conn.ackSeq = m.s;
@@ -138,6 +141,7 @@ class Room {
       case 'pause': case 'away':
         if (!live || (pz && (pz.reason === 'offline' || pz.resumeAt == null))) return;
         this.pause = { by: slot, reason: a === 'away' ? 'away' : 'player', resumeAt: null, prev: null };
+        this.event('pause:' + this.pause.reason);
         if (!G.paused) this.game.g.pauseGame();
         this.sendRoom(); this.urgent = true; return;
       case 'resume':
@@ -193,7 +197,7 @@ class Room {
     if (this.phase === 'closed') return;
     const pz = this.pause;
     if (pz && pz.resumeAt != null && this.k >= pz.resumeAt) {
-      this.pause = null; this.game.g.resumeGame(); this.sendRoom(); this.urgent = true;
+      this.pause = null; this.game.g.resumeGame(); this.sendRoom(); this.urgent = true; this.event('resumed');
     }
     if (this.phase === 'game' && !this.pause) {
       net.step();

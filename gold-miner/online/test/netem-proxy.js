@@ -22,8 +22,12 @@ function startProxy(opts = {}) {
     const up = net.connect(opts.target, opts.targetHost || '127.0.0.1');
     socks.add(client); socks.add(up);
     pipe(client, up); pipe(up, client);
-    const end = () => { client.destroy(); up.destroy(); socks.delete(client); socks.delete(up); };
+    const end = () => {
+      if (st.blackhole) return;                                  // black hole: a close is swallowed too (the far side never learns)
+      client.destroy(); up.destroy(); socks.delete(client); socks.delete(up);
+    };
     client.on('error', end); up.on('error', end); client.on('close', end); up.on('close', end);
+    client.on('end', end); up.on('end', end);
   });
   return new Promise(resolve => server.listen(opts.port || 0, '127.0.0.1', () => resolve({
     port: server.address().port,
