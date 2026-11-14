@@ -130,7 +130,7 @@ async function drive(page, opt = {}) {
         else if (now > readyAt && !st.shopReady) { await page.keyboard.press('KeyW'); readyAt = now + 900; }
       }
     }
-    await sleep(opt.poll || 20);
+    await sleep(opt.poll || 40);                                         // the server shares this process: do not crowd its timers
   }
   return { samples, ms: Date.now() - t0 };
 }
@@ -263,12 +263,12 @@ function swingSmooth(rec) {                    // O-15: the other player's hook 
   return { n, ok };
 }
 function predictionCheck(rec, keys) {          // O-14: next frame after the key shows the hook out; extension frames follow speed x dt (+-30 px)
-  let presses = 0, nextOk = 0, n = 0, ok = 0, worst = 0;
+  let presses = 0, nextOk = 0, n = 0, ok = 0, worst = 0, refused = 0;
   for (const k of keys) {
     if (k.code !== 'KeyS' && k.code !== 'ArrowDown') continue;
     const i = rec.findIndex(f => f.t > k.t);
     if (i < 1 || rec[i - 1].st !== 'swing' || rec[i - 1].sc !== 'play' || rec[i - 1].paused) continue;   // only presses that start a fire
-    if (!rec[i].pred && rec[i].st === 'swing') continue;                          // the page itself refused (e.g. tug / frozen)
+    if (!rec[i].pred) { refused++; continue; }                                    // the page did not start a fire (tug, frozen, previous fire unanswered)
     presses++;
     if (rec[i].st === 'extend' && rec[i].len > 34) nextOk++;
     for (let j = i + 1; j < rec.length && rec[j].st === 'extend' && rec[j - 1].st === 'extend'; j++) {
@@ -277,7 +277,7 @@ function predictionCheck(rec, keys) {          // O-14: next frame after the key
       if (dev > 30 && process.env.O14_DEBUG) console.log('O14 dev', dev.toFixed(1), JSON.stringify(rec.slice(Math.max(i, j - 3), j + 2).map(f => [Math.round(f.t), f.st, Math.round(f.len), f.pred, f.rt && Math.round(f.rt * 10) / 10])));
     }
   }
-  return { presses, nextOk, n, ok, worst };
+  return { presses, nextOk, n, ok, worst, refused };
 }
 function fireAccuracy(fires) {                 // O-13
   const shown = fires.filter(f => f.shownAngle != null);
@@ -367,7 +367,7 @@ async function o10(browser, srv) {
 async function o12(browser) {
   const srv = await startSrv({ netSim: { lat: 100, jitter: 50, stallP: 0.02, stallMs: 300 } });
   try {
-    const out = [], fires = [], pc = { presses: 0, nextOk: 0, n: 0, ok: 0, worst: 0 };
+    const out = [], fires = [], pc = { presses: 0, nextOk: 0, n: 0, ok: 0, worst: 0, refused: 0 };
     let allSame = true, errs = 0;
     for (const seed of [5, 6, 7]) {                                           // one game after the other (no CPU contention between them)
       const r = Object.assign(await realPair(browser, srv, { seed, nameA: '甲' + seed, nameB: '乙' + seed }), { seed });
@@ -394,7 +394,7 @@ async function o12(browser) {
     report('O-13', fa.n >= 30 && fa.within / fa.n >= 0.95 && fa.notBack / fa.n <= 0.02 && fa.maxBack <= 4,
       `${fa.n} fires with a shown angle (of ${fa.total} server fires): |shown - server| <= 1.5 deg for ${fa.within} (${pct(fa.within, fa.n)}, need >= 95%); outside the look-back window ${fa.notBack} (${pct(fa.notBack, fa.n)}, need <= 2%; ${fa.stalled} of them had their own input message stalled by the simulated network); max error of the lag-compensated ones ${fa.maxBack.toFixed(3)} deg (need <= 4); max overall ${fa.maxAll.toFixed(2)} deg; age of the aimed tick on arrival p50 ${ages[ages.length >> 1]} / p95 ${ages[Math.floor(ages.length * 0.95)]} / max ${ages[ages.length - 1]} ticks (window 30)`);
     report('O-14', pc.presses >= 30 && pc.nextOk === pc.presses && pc.ok / pc.n >= 0.98,
-      `${pc.presses} fire presses: next frame shows the own hook extending with len > HOOK.minLen in ${pc.nextOk}/${pc.presses}; extension frames with |delta len - speed x dt| <= 30 px: ${pc.ok}/${pc.n} (${pct(pc.ok, pc.n)}, need >= 98%; worst ${pc.worst.toFixed(1)} px)`);
+      `${pc.presses} fire presses that started a fire on the page (${pc.refused} other presses on a swinging hook were not fires there: tug / frozen / previous fire still unanswered): next frame shows the own hook extending with len > HOOK.minLen in ${pc.nextOk}/${pc.presses}; extension frames with |delta len - speed x dt| <= 30 px: ${pc.ok}/${pc.n} (${pct(pc.ok, pc.n)}, need >= 98%; worst ${pc.worst.toFixed(1)} px)`);
   } finally { await srv.close(); }
 }
 

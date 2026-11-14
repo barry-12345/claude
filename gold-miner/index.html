@@ -4600,6 +4600,8 @@ function netOpen(first) {
     const data = typeof ev.data === 'string' ? ev.data : '';
     NETC.rx += data.length; NETC.lastMsgAt = performance.now();
     let m; try { m = JSON.parse(data); } catch (e) { return; }
+    // arrival time = when the message was queued (Event.timeStamp), not when a busy frame let this handler run
+    NETC.arrivedAt = typeof ev.timeStamp === 'number' && ev.timeStamp > 0 && ev.timeStamp <= performance.now() ? ev.timeStamp : performance.now();
     netMsg(m);
   };
   ws.onclose = () => { if (NETC.ws !== ws) return; NETC.ws = null; NETC.connected = false; netLost(); };
@@ -4685,7 +4687,7 @@ function netRoom(m) {
   if (NETC.you >= 0 && NETC.seats[NETC.you]) NETC.mine.again = !!NETC.seats[NETC.you].again;
 }
 function netSnap(m) {
-  const now = performance.now();
+  const now = NETC.arrivedAt || performance.now();
   if (m.full) NETC.mirror = m.d;
   else if (NETC.mirror) NETC.mirror = netPatch(NETC.mirror, m.d);
   else return;
@@ -4693,9 +4695,10 @@ function netSnap(m) {
   NETC.buf.push({ k: m.k, S: NETC.mirror });
   if (m.fx && m.fx.length) NETC.fxq.push({ k: m.k, fx: m.fx });
   // arrival clock: the least-delayed snapshot of the last 3 s defines "now" on the server's tick line as seen from here;
-  // jitter sample = change of the transit time from one snapshot to the next
+  // jitter sample = how much later than the previous snapshot this one travelled (one sample per late snapshot: the
+  // on-time snapshot after a late one is a decrease and does not count again)
   const o = m.k - now * NET_TICK / 1000, prevO = NETC.arr.length ? NETC.arr[NETC.arr.length - 1].o : o;
-  NETC.arr.push({ t: now, o, j: Math.abs(o - prevO) * 1000 / NET_TICK });
+  NETC.arr.push({ t: now, o, j: Math.max(0, prevO - o) * 1000 / NET_TICK });
   while (NETC.arr.length && NETC.arr[0].t < now - 3000) NETC.arr.shift();
   const best = NETC.arr.reduce((a, b) => Math.max(a, b.o), -Infinity);
   const target = NETC.pongOff !== null ? Math.max(NETC.pongOff, best) : best;   // the server clock (from pongs), never behind what has arrived
@@ -4989,7 +4992,8 @@ function drawNetOverlay(c) {
 }
 function netPanel(c, title, sub, menu) {
   dim(c, 0.62);
-  panel(c, W / 2 - 300, 170, 600, 360, { fill: 'rgba(20,24,52,0.95)', stroke: '#ffd23a', lw: 4 });
+  const ph = menu ? 360 : (pzEndOffer() ? 360 : 190);                    // no menu: a compact panel
+  panel(c, W / 2 - 300, 170, 600, ph, { fill: 'rgba(20,24,52,0.95)', stroke: '#ffd23a', lw: 4 });
   T(c, title, W / 2, 236, { size: 38, align: 'center', color: '#ffd23a', stroke: '#7a3a08', sw: 7 });
   if (sub) T(c, sub, W / 2, 300, { size: 24, align: 'center', color: '#e6ecff', bold: false });
   if (!menu) return;
@@ -5003,6 +5007,7 @@ function netPanel(c, title, sub, menu) {
   });
   T(c, 'W/S 选择    空格/回车 确认    P/Esc 继续(任一方都可以)', W / 2, 500, { size: 14, align: 'center', color: '#aab', bold: false });
 }
+const pzEndOffer = () => { const pz = NETC.pause; return !!(pz && pz.reason === 'offline' && pz.endOffer && pz.by !== NETC.you); };
 function drawNetHint(c) {                     // centred two-second notice ("联机对战需在电脑上进行" etc.)
   const h = NETC.hint; if (!h) return;
   const left = h.until - performance.now(); if (left <= 0) { NETC.hint = null; return; }
@@ -5021,7 +5026,7 @@ function drawGlobe(c, x, y, r) {
 function netStats() {
   return { connected: NETC.connected, you: NETC.you, room: NETC.room, rtt: NETC.rtt, rttMin: NETC.rttMin, offsetTicks: NETC.pongOff, renderOffset: NETC.renderOff,
     interpDelayMs: NETC.D, interpTargetMs: NETC.Dtarget, jitterMs: NETC.jitter, bufferLen: NETC.buf.length, predActive: !!NETC.pred, lastSnapTick: NETC.lastK, renderTick: NETC.rt,
-    rxBytes: NETC.rx, txBytes: NETC.tx, lastFire: NETC.lastFire, fires: NETC.fireLog.slice(), ui: NETC.ui, pause: NETC.pause, seats: NETC.seats, phase: NETC.phase, closed: NETC.closed };
+    rxBytes: NETC.rx, txBytes: NETC.tx, lastFire: NETC.lastFire, fires: NETC.fireLog, ui: NETC.ui, pause: NETC.pause, seats: NETC.seats, phase: NETC.phase, closed: NETC.closed };
 }
 
 // debug hook for tests
