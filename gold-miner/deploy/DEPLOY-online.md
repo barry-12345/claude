@@ -62,7 +62,7 @@ nslookup goldminer.43.161.221.249.sslip.io
 
 ## 4. 把项目传到服务器并部署
 
-先用 SSH 登录服务器(和以前一样)。把项目放到服务器上,二选一:
+先用 SSH 登录服务器(和以前一样;腾讯云轻量的 Ubuntu 默认登录用户是 `ubuntu`,例如 `ssh ubuntu@43.161.221.249`,需要权限的命令前面都加了 `sudo`)。把项目放到服务器上,二选一:
 
 **方法 A:git clone**(服务器能访问 GitHub 时)
 
@@ -75,13 +75,13 @@ cd goldminer-src/gold-miner
 **方法 B:scp 上传**(在你自己的电脑上运行,把整个 `gold-miner` 文件夹传上去)
 
 ```bash
-scp -r gold-miner root@43.161.221.249:~/goldminer-src
+scp -r gold-miner ubuntu@43.161.221.249:~/goldminer-src
 ```
 
-然后在服务器上进入目录:
+然后在服务器上进入项目目录(下文的命令都在这个目录里运行):
 
 ```bash
-cd ~/goldminer-src
+cd ~/goldminer-src          # 用方法 A(git clone)时是 cd ~/goldminer-src/gold-miner
 ```
 
 **第一步:试运行**(只检查、只打印,不做任何修改):
@@ -138,7 +138,7 @@ sudo bash deploy/deploy-online.sh --domain goldminer.43.161.221.249.sslip.io
 更新(先 `git pull` 或重新上传新文件,再运行):
 
 ```bash
-cd ~/goldminer-src
+cd ~/goldminer-src          # 用方法 A(git clone)时是 cd ~/goldminer-src/gold-miner
 sudo bash deploy/update-online.sh --dry-run
 sudo bash deploy/update-online.sh
 ```
@@ -172,7 +172,8 @@ systemctl status goldminer-online
 **Q1:证书一直没签下来,`curl https://goldminer.43.161.221.249.sslip.io/online/health` 报证书错误或连不上。**
 sslip.io 是很多人共用的域名,Let's Encrypt 按注册域名限制签发次数,偶尔会失败。Caddy 会自动重试,
 失败多次还会自动改用 ZeroSSL,通常几分钟到几十分钟内会好。可以用 `journalctl -u caddy -n 100 --no-pager | grep -i goldminer` 看进度。
-一直不行的话,改用你自己的域名(第 2 节的备选做法)。脚本在这种情况下会提示"HTTPS 自检未通过"并以代码 3 退出,
+一直不行的话,改用你自己的域名(第 2 节的备选做法)。脚本在这种情况下会提示
+"注意: Caddy 配置已生效、现有站点正常,但 2 分钟内还访问不到 https://…/online/health。"并以代码 3 退出,
 但已经部署好的东西不会被撤销,证书签下来后就能用。
 
 **Q2:页面提示"游戏已更新,请刷新页面"。**

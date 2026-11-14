@@ -451,6 +451,39 @@ async function o16(browser, srv) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+//  after a reconnect / reload: the first S press on a swinging hook must fire (server hook leaves "swing" within 500 ms)
+// ---------------------------------------------------------------------------------------------------------------
+async function firstFire(P, slot, srv, code, pages, limit = 30000) {
+  const t0 = Date.now();
+  for (;;) {
+    if (Date.now() - t0 > limit) return { ok: false, ms: -1, why: 'hook never ready' };
+    const st = await srv.api(`/__test/room/${code}/state`), S = st.state;
+    if (S.screen === 'shop' && pages) {                                       // keep the game going: both ready up in the shop
+      for (const [i, pg] of pages.entries()) if (pg && S.shop[i] && !S.shop[i].ready) await pg.keyboard.press('KeyW');
+      await sleep(600); continue;
+    }
+    const sp = S.players[slot];
+    const pv = await G(P, () => { const g = __game, s = g.net.stats(), G_ = g.G, me = G_.players[s.you];
+      return !!(s.connected && !s.pause && !G_.paused && G_.screen === 'play' && me && me.alive && me.hook.state === 'swing' && !s.predActive && me.frozen <= 0 && !G_.timeUp && !G_.tug && G_.noFireT <= 0); });
+    if (pv && !st.paused && S.screen === 'play' && sp.alive && sp.hook.state === 'swing' && sp.frozen <= 0 && !S.timeUp && !S.tug && S.noFireT <= 0 && S.hitStop <= 0) break;
+    await sleep(40);
+  }
+  await P.keyboard.press('KeyS');
+  const tp = Date.now();
+  while (Date.now() - tp < 500) {
+    const st = await srv.api(`/__test/room/${code}/state`);
+    if (st.state.players[slot].hook.state !== 'swing') return { ok: true, ms: Date.now() - tp };
+    await sleep(15);
+  }
+  return { ok: false, ms: -1, why: 'no fire within 500 ms' };
+}
+async function untilRunning(srv, code, ms = 30000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { const st = await srv.api(`/__test/room/${code}/state`); if (!st.paused && st.seats.every(x => x && x.online)) return Date.now() - t0; await sleep(50); }
+  return -1;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 //  O-20 drop + reconnect, O-21 reload, both played to the end at the same time
 // ---------------------------------------------------------------------------------------------------------------
 async function o20o21(browser, srv) {
@@ -459,10 +492,12 @@ async function o20o21(browser, srv) {
   for (const p of [r20.A, r20.B, r21.A, r21.B]) await p.evaluate(ONLINE_BOT);
   await realSelect(r20.A, r20.B); await realSelect(r21.A, r21.B);
   await wait(r20.A, () => __game.G.screen === 'play', null, 8000); await wait(r21.A, () => __game.G.screen === 'play', null, 8000);
-  let stopB21 = false;
-  const games = [drive(r20.A), drive(r20.B), drive(r21.A), drive(r21.B, { until: async () => stopB21 })];
+  let stopB21 = false, stopB20 = false;
+  const boosts = [topUp(srv, r20.code), topUp(srv, r21.code)];               // keep both games going while the checks run
+  const games = [drive(r20.A), drive(r20.B, { until: async () => stopB20 }), drive(r21.A), drive(r21.B, { until: async () => stopB21 })];
   // ---- O-20
   await sleep(2500);
+  stopB20 = true; await games[1];                                            // B stops playing: its first press after the reconnect is measured
   const st0 = await srv.api(`/__test/room/${r20.code}/state`);
   const drop = await srv.api(`/__test/drop?room=${r20.code}&slot=1`, {});
   const tDrop = Date.now();
@@ -479,6 +514,8 @@ async function o20o21(browser, srv) {
   while (Date.now() - tBack < 6000) { const s = await srv.api(`/__test/room/${r20.code}/state`); if (!s.paused) { resumedAfter = Date.now() - tBack; break; } await sleep(50); }
   const evs = (await srv.api(`/__test/room/${r20.code}/state`)).events;
   const kOff = (evs.find(e => e.ev === 'pause:offline') || {}).k, kRes = (evs.filter(e => e.ev === 'resumed').pop() || {}).k;
+  const fire20 = await firstFire(r20.B, 1, srv, r20.code, [null, r20.B]);   // (B's bot is stopped: ready B up if a shop comes)
+  games[1] = drive(r20.B);
   // ---- O-21 (in parallel)
   await sleep(1500);
   stopB21 = true; await games[3];
@@ -492,18 +529,67 @@ async function o20o21(browser, srv) {
   const st21 = await srv.api(`/__test/room/${r21.code}/state`);
   const equal = JSON.stringify(mirror) === JSON.stringify(st21.state);
   await r21.A.keyboard.press('Space');                                         // "继续"
+  const fire21 = await firstFire(r21.B, 1, srv, r21.code, [null, r21.B]);
   games[3] = drive(r21.B);
   await Promise.all(games);
+  for (const b of boosts) await b.stop();
   for (const r of [r20, r21]) { await wait(r.A, () => __game.G.screen === 'final', null, 20000).catch(() => {}); await wait(r.B, () => __game.G.screen === 'final', null, 20000).catch(() => {}); }
   await sleep(600);
   const f20 = await finalsAgree([r20.A, r20.B], srv, r20.code), f21 = await finalsAgree([r21.A, r21.B], srv, r21.code);
   const e20 = r20.A.errors.length + r20.B.errors.length, e21 = r21.A.errors.length + r21.B.errors.length;
   const timeDiff = Math.abs(drop.time - frozen1.state.time);
-  report('O-20', sawOverlay >= 0 && sawOverlay <= 1000 && frozen1.state.time === frozen2.state.time && timeDiff <= 1 / 60 + 1e-9 && back >= 0 && back <= 3000 && bConn && kRes - kOff >= 180 && f20.same && e20 === 0,
-    `B's TCP destroyed at G.time ${drop.time.toFixed(3)} (k ${drop.k}); server frozen at ${frozen1.state.time.toFixed(3)} (diff ${(timeDiff * 60).toFixed(2)} ticks), unchanged 400 ms later=${frozen1.state.time === frozen2.state.time}; A shows "乙 连接中断" after ${sawOverlay} ms; B back on its seat after ${back} ms; game running again ${resumedAfter} ms later (offline at k ${kOff}, resumed at k ${kRes}: ${kRes - kOff} ticks incl. 180-tick countdown); played to the end: ${f20.same ? 'identical' : 'DIFFERENT'} finals (${scoreStr(f20.server)}); errors ${e20}`);
-  report('O-21', you21 === 1 && equal && f21.same && e21 === 0,
-    `B reloaded mid-game: back as player ${you21 + 1}; with the game paused B's snapshot == server state: ${equal}; played to the end: ${f21.same ? 'identical' : 'DIFFERENT'} finals (${scoreStr(f21.server)}); errors ${e21}`);
+  report('O-20', sawOverlay >= 0 && sawOverlay <= 1000 && frozen1.state.time === frozen2.state.time && timeDiff <= 1 / 60 + 1e-9 && back >= 0 && back <= 3000 && bConn && kRes - kOff >= 180 && fire20.ok && f20.same && e20 === 0,
+    `B's TCP destroyed at G.time ${drop.time.toFixed(3)} (k ${drop.k}); server frozen at ${frozen1.state.time.toFixed(3)} (diff ${(timeDiff * 60).toFixed(2)} ticks), unchanged 400 ms later=${frozen1.state.time === frozen2.state.time}; A shows "乙 连接中断" after ${sawOverlay} ms; B back on its seat after ${back} ms; game running again ${resumedAfter} ms later (offline at k ${kOff}, resumed at k ${kRes}: ${kRes - kOff} ticks incl. 180-tick countdown); B's first S press afterwards fired after ${fire20.ms} ms (${fire20.ok ? 'ok' : fire20.why}); played to the end: ${f20.same ? 'identical' : 'DIFFERENT'} finals (${scoreStr(f20.server)}); errors ${e20}`);
+  report('O-21', you21 === 1 && equal && fire21.ok && f21.same && e21 === 0,
+    `B reloaded mid-game: back as player ${you21 + 1}; with the game paused B's snapshot == server state: ${equal}; after A's 继续 B's first S press fired after ${fire21.ms} ms (${fire21.ok ? 'ok' : fire21.why}); played to the end: ${f21.same ? 'identical' : 'DIFFERENT'} finals (${scoreStr(f21.server)}); errors ${e21}`);
   await closeAll(r20.A, r20.B, r21.A, r21.B);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+//  O-20b (round-2 rework) normal round length: drop / 6 s offline / reload of P2 / reload of P1, 10 times each;
+//  after each recovery the first S press on a swinging hook must fire within 500 ms
+// ---------------------------------------------------------------------------------------------------------------
+async function o20b(browser) {
+  const srv = await startSrv({ fast: false });
+  try {
+    const { A, B, code } = await realPair(browser, srv, { seed: 71 });
+    await realSelect(A, B);
+    const boost = topUp(srv, code);
+    const pages = [A, B], res = {};
+    const run = async (name, slot, recover) => {
+      const r = { ok: 0, ms: [], fails: [], pressNeeded: 0 };
+      for (let i = 0; i < 10; i++) {
+        await recover();
+        const P = pages[slot], f = await firstFire(P, slot, srv, code, pages);
+        if (f.ok) { r.ok++; r.ms.push(f.ms); } else r.fails.push(f.why);
+      }
+      res[name] = r;
+    };
+    // a reload: wait for the page to be back on its seat; if the room is paused by a player, `who` presses 继续 (Enter)
+    const reload = (P, who) => async () => {
+      await P.reload(); await P.waitForFunction(() => window.__game && __game.net.stats().connected && __game.net.stats().ui === 'game', null, { timeout: 15000 });
+      for (let k = 0; k < 40; k++) {
+        const st = await srv.api(`/__test/room/${code}/state`);
+        if (st.seats.every(x => x && x.online) && st.pause && (st.pause.reason === 'player' || st.pause.reason === 'away') && st.pause.resumeAt == null) { await who.keyboard.press('Enter'); res.pressed = (res.pressed || 0) + 1; break; }
+        if (!st.paused && st.seats.every(x => x && x.online)) break;
+        await sleep(100);
+      }
+      await untilRunning(srv, code);
+    };
+    await run('drop P2', 1, async () => { await srv.api(`/__test/drop?room=${code}&slot=1`, {}); await sleep(300); await untilRunning(srv, code); });
+    await run('offline 6 s P2', 1, async () => { await B.ctx.setOffline(true); await sleep(6000); await B.ctx.setOffline(false); await untilRunning(srv, code, 40000); });
+    await run('reload P2 (P1 resumes)', 1, reload(B, A));
+    await run('reload P1 (P1 resumes)', 0, reload(A, A));
+    await boost.stop();
+    const all = Object.values(res).filter(r => r && r.ms);
+    // while the context is offline, Chromium itself logs each failed reconnect attempt: expected, not a page error
+    const offlineLog = B.errors.filter(e => /ERR_INTERNET_DISCONNECTED/.test(e)).length;
+    A.errors = A.errors.filter(e => !/ERR_INTERNET_DISCONNECTED/.test(e)); B.errors = B.errors.filter(e => !/ERR_INTERNET_DISCONNECTED/.test(e));
+    const ok = all.length === 4 && all.every(r => r.ok === 10) && A.errors.length + B.errors.length === 0;
+    report('O-20b', ok, Object.entries(res).filter(([, r]) => r && r.ms).map(([n, r]) => `${n}: ${r.ok}/10 fired, max ${r.ms.length ? Math.max(...r.ms) : '-'} ms${r.fails.length ? ' FAIL ' + r.fails.join(',') : ''}`).join('; ') +
+      `; reloads that needed a 继续 press: ${res.pressed || 0} (a reload no longer pauses the game as "away"); browser's own "ERR_INTERNET_DISCONNECTED" lines while offline: ${offlineLog}; errors ${A.errors.length + B.errors.length}${A.errors.length + B.errors.length ? ' ' + JSON.stringify(A.errors.concat(B.errors).slice(0, 3)) : ''}`);
+    await closeAll(A, B);
+  } finally { await srv.close(); }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -699,6 +785,7 @@ async function run(browser) {
     const tok = await o10(browser, srv);
     await o16(browser, srv);
     await o20o21(browser, srv);
+    await o20b(browser);
     await o22(browser, srv);
     await o24(browser, srv);
     await o25(browser, srv);
@@ -713,4 +800,4 @@ async function run(browser) {
 }
 
 module.exports = { run, startSrv, onlinePage, realPair, realSelect, drive, ONLINE_BOT, finalsAgree, scoreStr, closeAll, TEXT_SPY, frameTexts, shot, sleep, G, wait, median, pct, SHOTS, ALL_URLS, WS_URLS,
-  o02, o05, o07, o10, o12, o16, o20o21, o22, o23, o24, o25, o26, o27, shotsLobby };
+  o02, o05, o07, o10, o12, o16, o20o21, o20b, o22, o23, o24, o25, o26, o27, shotsLobby };

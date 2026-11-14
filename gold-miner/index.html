@@ -4714,6 +4714,7 @@ function netSnap(m) {
   if (typeof m.ack === 'number') {
     NETC.ack = m.ack;
     if (NETC.pred && !NETC.pred.confirmed && m.ack >= NETC.pred.seq) NETC.pred = null;            // processed, but the server did not fire
+    if (NETC.inflight && m.ack >= NETC.inflight) NETC.inflight = 0;
   }
   const keep = NETC.rt - 90;                                                                     // ~1.5 s of history
   while (NETC.buf.length > 2 && NETC.buf[1].k < keep) NETC.buf.shift();
@@ -4870,7 +4871,8 @@ function netFire() {
   const p = G.players[NETC.you]; if (!p) return;
   const h = p.hook;
   // a fire still unanswered by the server (a stalled connection): the picture is stale, a second shot would aim at the past
-  if (!G.tug && NETC.inflight > NETC.ack) return;
+  // (inflight is the seq of an unanswered fire on *this* connection; 0 = none. A new connection clears it, so a reconnect never blocks)
+  if (!G.tug && NETC.inflight > 0 && NETC.inflight > NETC.ack) return;
   if (G.tug || NETC.pred || h.state !== 'swing' || !p.alive || p.frozen > 0 || G.timeUp || G.noFireT > 0 || G.paused) { netAct('fire', { at: Math.round(rt * 1000) / 1000 }); return; }
   const seq = netAct('fire', { at: Math.round(rt * 1000) / 1000 });
   // what this page showed when the key went down (stats().lastFire / fires): angle in degrees, ticks past the newest snapshot, D
@@ -4921,8 +4923,10 @@ function netKeyHook(e) {
   return true;
 }
 // tab hidden: tell the server at once (it pauses both players) instead of waiting for a timeout
+// a reload / closing the tab also hides it: that is not "switched to another window" (no pause for the other player)
+for (const ev of ['beforeunload', 'pagehide']) addEventListener(ev, () => { NETC.unloading = true; });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && netGame() && NETC.connected && !NETC.pause && (G.screen === 'intro' || G.screen === 'play')) netAct('away');
+  if (document.hidden && !NETC.unloading && netGame() && NETC.connected && !NETC.pause && (G.screen === 'intro' || G.screen === 'play')) netAct('away');
 });
 
 // ---- touch devices: online play needs a computer (no WebSocket is ever opened here)
