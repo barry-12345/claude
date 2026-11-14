@@ -27,7 +27,7 @@ const frameTexts = page => G(page, () => new Promise(res => { window.__texts = [
 // ---------------------------------------------------------------------------------------------------------------
 const RELAXED = { connPerMin: 10000, perIp: 1000, createPerHour: 1000, joinFailPerMin: 1000, joinFailPerHour: 10000 };   // all contexts share 127.0.0.1
 async function startSrv(over = {}) {
-  const srv = createServer(Object.assign({ port: 0, testHooks: true, fast: true, log: false, serveStatic: L.ROOT, gameHtml: L.INDEX, limits: RELAXED }, over));
+  const srv = createServer(Object.assign({ port: 0, testHooks: true, fast: true, log: false, serveStatic: path.dirname(L.INDEX), gameHtml: L.INDEX, limits: RELAXED }, over));
   const a = await srv.listen(0, '127.0.0.1');
   srv.base = `http://127.0.0.1:${a.port}`;
   srv.cfg.allowedOrigins = [srv.base];                                        // ALLOWED_ORIGINS=http://127.0.0.1:<port>
