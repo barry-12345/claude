@@ -1,0 +1,162 @@
+{
+  "pids": {
+    "serverPid": 2388,
+    "clientPid": 44240
+  },
+  "errors": {
+    "p0Console": [],
+    "p1Console": [],
+    "p0PageErr": [],
+    "p1PageErr": [],
+    "http4xx5xx": []
+  },
+  "steps": {
+    "part1_reconnect": {
+      "room1": "TKCU",
+      "scoreBeforeDrop": {
+        "format": "fast4",
+        "games": [
+          0,
+          0
+        ],
+        "points": [
+          0,
+          0
+        ],
+        "isTiebreak": false,
+        "isDecidingPoint": false,
+        "server": 0,
+        "serveNumber": 2,
+        "courtSide": "deuce",
+        "keyPointLabel": "NONE",
+        "winner": null
+      },
+      "p0DuringDisconnect": {
+        "phase": "paused_disconnect",
+        "modalTitle": "对手断线重连中",
+        "countdown": "15s"
+      },
+      "sawResuming": true,
+      "scoreAfterReconnect": {
+        "format": "fast4",
+        "games": [
+          0,
+          0
+        ],
+        "points": [
+          0,
+          0
+        ],
+        "isTiebreak": false,
+        "isDecidingPoint": false,
+        "server": 0,
+        "serveNumber": 2,
+        "courtSide": "deuce",
+        "keyPointLabel": "NONE",
+        "winner": null
+      },
+      "p1LastResetReason": "MATCH_RESUMED",
+      "p1PosBefore": {
+        "x": -0.7900950522778296,
+        "y": 0,
+        "z": 12.334999999999999
+      },
+      "p1PosAfterMove": {
+        "x": -1.0691743040078332,
+        "y": 0,
+        "z": 12.334999999999999
+      },
+      "p1MeterDuringKeyK": {
+        "active": true,
+        "action": "K",
+        "progress": 0.5075,
+        "sweetCenter": 0.78,
+        "effectiveHalfWidth": 0.08047599999999999,
+        "lastQuality": null
+      }
+    },
+    "part2_pause_limit_and_60s": {
+      "sawAutoResuming": true,
+      "manualPausesLeftAfter1": [
+        2,
+        3
+      ],
+      "manualPausesLeftAfter3": [
+        0,
+        3
+      ],
+      "fourthAttemptToast": "比赛恢复！本场暂停次数（3次）已用尽",
+      "phaseAfterFourthAttempt": "serve_ready"
+    },
+    "part3_forfeit": {
+      "room2": "RFZM",
+      "p0bDuringDiscPhase": "paused_disconnect",
+      "forfeitElapsedMs": 14368,
+      "forfeitPhase": "match_over",
+      "forfeitWinner": 0,
+      "modalTitleForfeit": "🏆 胜利！MATCH WINNER",
+      "modalTextForfeit": "🏆 胜利！MATCH WINNER\n          \n          对手断线超过 15 秒弃权，你获得胜利！\n          \n            \n              你2K 赛后统计对手\n            \n            \n              0Ace 发球直接得分0\n              0双误 (Double Faults)0\n              0%一发成功率0%\n              0制胜分 (Winners)0\n              0非受迫失误 (UE)0\n              0%Perfect 绿条率0%\n            \n          \n          \n            再来一局 (Rematch)\n            返回大厅",
+      "toastsForfeit": ""
+    },
+    "part1_reconnect_15_0": {
+      "roomCode": "LQRC",
+      "scoreBeforeDrop": {
+        "format": "fast4",
+        "games": [
+          0,
+          0
+        ],
+        "points": [
+          1,
+          0
+        ],
+        "isTiebreak": false,
+        "isDecidingPoint": false,
+        "server": 0,
+        "serveNumber": 1,
+        "courtSide": "ad",
+        "keyPointLabel": "NONE",
+        "winner": null
+      },
+      "p0DuringDiscPhase": "paused_disconnect",
+      "sawResuming": true,
+      "scoreAfterReconnect": {
+        "format": "fast4",
+        "games": [
+          0,
+          0
+        ],
+        "points": [
+          1,
+          0
+        ],
+        "isTiebreak": false,
+        "isDecidingPoint": false,
+        "server": 0,
+        "serveNumber": 1,
+        "courtSide": "ad",
+        "keyPointLabel": "NONE",
+        "winner": null
+      },
+      "p1LastResetReason": "MATCH_RESUMED",
+      "posBefore": {
+        "x": -2.15,
+        "y": 0,
+        "z": 12.334999999999999
+      },
+      "posAfter": {
+        "x": -0.42116981713525226,
+        "y": 0,
+        "z": 12.098948599999998
+      },
+      "meterDuringK": {
+        "active": true,
+        "action": "K",
+        "progress": 0.45916666666666667,
+        "sweetCenter": 0.78,
+        "effectiveHalfWidth": 0.08047599999999999,
+        "lastQuality": null
+      }
+    }
+  }
+}

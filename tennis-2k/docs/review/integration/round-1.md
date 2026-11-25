@@ -1,0 +1,26 @@
+结论：PASS
+候选版本：integration/v1 @ 270b3eff62bb07edda9cc5e90a8e4ce4d48d49f0
+本轮核验方式：代码审（跨包线协议、世界↔局部镜像、暂停/重连/输入复位、`/tennis/` 子路径与测试钩子隔离）+ 全量确定性构建/类型校验/测试复跑（`build` / `typecheck` / 50/50 Vitest + 端口 `4902` 16 并发房间 30s 压测）+ 一次性委派独立双会话 Tester `tester-integration` 于端口 `4521–4526` 执行 `E2E-01 ~ E2E-04`（报告见 `docs/review/integration/round-1-tester.md`）+ Reviewer 亲自核验全部 14 张双端关键帧截图与 4 份原始 JSON 实测日志
+
+达标项：
+- [版本、写边界与安全隔离 / AC-16] `git rev-parse HEAD` 为 `270b3eff62bb07edda9cc5e90a8e4ce4d48d49f0`（分支 `integration/v1`）；`git diff main..HEAD --name-only` 100% 严格限定于 `tennis-2k/**`（零触碰 `main`、`gold-miner` 或仓库根文件）；静态扫描确认 `client/src` 与 `server/src` 0 处深路径导入 `shared/src`，`@court2k/shared` 0 DOM/`three`/`ws`/`node:` 依赖。正常入口实测 `window.__COURT2K_TEST__ === undefined`、`.netdebug-panel` 隐藏且服务端 `testHooks=false`（`E2E-01` `e2e01-log.json`）。
+- [跨包线协议一致性与全量自动化基线 / CONTRACT §2–§4] 逐项交叉核对 `client/src/net/WsClient.ts`、`client/src/game/GameApp.ts`、`client/src/net/SnapshotBuffer.ts`、`client/src/net/onlineSync.ts` 与 `server/src/validation.ts`、`server/src/room.ts`、`server/src/roomManager.ts`、`server/src/server.ts`：全部 11 种 `ClientMessage` 与 15 种 `ServerMessage` 字段完全一致，输入序号复位（`lastAckSeq[idx]=0` / `resetInputSeq()`）、快照缓冲复位与 `InputController.resetAndRebind()` 6 类触发时机完整闭环。全工作区 `npm run build`（前端生产 gzip 总包体 **`163.88 KB`** `<= 600 KB`）、`npm run typecheck`（0 errors）、`npm test`（**50/50** 全绿：`shared` 25/25 含 AC-09 基准 Pro vs Rookie 83.3% / Legend vs Pro 80.0% / UE 2.05%→1.08%→0.24%；`client` 16/16；`server` 9/9）全部通过。
+- [E2E-01 / AC-10 正常入口双端对战、近端镜像、手动暂停与 Rematch] 不带 `?test=1`、服务端不开 `ENABLE_TEST_HOOKS` 条件下，双独立 Edge Context 跑通建房（`Q9GX`）、选 `power` vs `defender` 入房开赛、打完 Fast4 第 1 局至 `1-0` 且双端比分与换发完全同步；双端成对截图（`e2e01-p0-mirror.png`、`e2e01-p1-mirror.png`）直观证实 P0（红衣白头带）与 P1（荧光绿反戴帽）**各自均处于屏幕下方近端向上击球**且球位/落点环精确 180° 镜像；联机 P0 按 `Esc` 触发手动暂停（`e2e01-pause-modal.png`，显示 `60s` 与次数 `你 2 次 / 对手 3 次`），P1 点击恢复走 3s 倒计时后双方立即按键击球响应（`LATE · 182 km/h`）；正常入口另开超级抢十（`EZC5`）完赛 `10-2`（双端 6 项 2K 统计互为镜像一致）后双方点击 Rematch 免重输房间码开新局，比分归 `0-0`、暂停次数恢复 `[3, 3]`（`e2e01-rematch-started.png`）；全程 0 console/page error、0 4xx/5xx。
+- [E2E-02 / AC-07 & AC-10 联机鹰眼双端同步与镜像] 双端联机触发 `8 cm` 边线球同步切入 `1882 ms` 3D 鹰眼特写，双端一致判 `IN · 界内`（`7.3 cm`）且 `bouncePos` 精确互为 180° 镜像（P0 `(4.042, 0.0335, -7.536)` / P1 `(-4.042, 0.0335, 7.536)`，`e2e02-p0-hawkeye-in.png`、`e2e02-p1-hawkeye-in.png`），`HAWKEYE_END` 后双方均立即触发输入重置并按 `KeyD` 产生实时位移（P0 `-1.45→-0.61`、P1 `-2.15→-0.35`）；`10 cm` 底线球双端一致判 `OUT · 出界`（`7.2 cm`，`e2e02-p0-hawkeye-out.png`、`e2e02-p1-hawkeye-out.png`）；`25 cm` 反例双端均未误触发鹰眼。
+- [E2E-03 / AC-11 & AC-10 4s 刷新重连防按键失灵、暂停边界与 15s 弃权] ① 房 `LQRC` 打出 `15-0` 后 P1 跳转 `about:blank` 断线约 4 秒期间 P0 显示 15s 断线暂停弹窗（`e2e03-p0-disconnect-15s.png`）；P1 返回页面经 `sessionStorage` 自动 `RECONNECT` + `FULL_SYNC` 完整保留 `15-0` 比分与站位，走完 3s 恢复倒计时（`lastResetReason === 'MATCH_RESUMED'`）瞬间 P1 立即按 `WASD` + `K` 实测位移 `x: -2.15 → -0.42` 且 2K 绿条激活 `progress: 0.459`（`e2e03-p1-after-reconnect.png`），彻底无卡键失灵；② 房 `TKCU` 实测 60s 手动暂停快进自动恢复，及第 4 次暂停被拒并弹出「本场暂停次数（3次）已用尽」；③ 房 `RFZM` 实测 P1 永久断线实等超 15 秒（`14.37s` 计时后结算）P0 直接弹出唯一 `MATCH_OVER(reason:'forfeit')` 胜利结算面板（`e2e03-p0-forfeit-win.png`），不卡暂停弹窗且 0 条 `ERROR` Toast。
+- [E2E-04 / AC-12 & AC-13 & AC-15 `/tennis/` 子路径反代、`?netdebug=1` 与 16 房 60Hz 压测] `VITE_BASE_PATH=/tennis/` 生产构建配合本地反代（`4523 → 4524`，非 `/tennis/` 根路径返回 `404`），访问 `http://127.0.0.1:4523/tennis/?netdebug=1` 跑通单机与 1v1 联机（`MX5Y`，双端 WS 均走 `ws://127.0.0.1:4523/tennis/ws`），0 个 404、0 console/page error；`.netdebug-panel` 完整展示全部 10 项指标（含实时 `RTT: 1ms` / `8ms`、`DrawCalls: 100 <= 150`、`ActiveDPR: 1.00 <= 2.0`，且在无 GPU SwiftShader 负载下正确自动降档 `MEDIUM`/`LOW`，`e2e04-subpath-netdebug-p0.png`、`e2e04-subpath-netdebug-p1.png`）；同时 Reviewer 于端口 `4902` 在整合候选版本上实跑 16 并发房间 60Hz 30 秒压测：`1802` ticks（`~60.0 Hz`）、平均 tick **`0.669 ms`**（`< 8 ms`）、Max `5.793 ms`、Peak RSS **`94.82 MB`**（`<= 256 MB`）。
+- [单包基线沿用 / AC-01 ~ AC-06, AC-08, AC-13, AC-14] 三场地弹跳/扬尘、四流派 400 分均衡、2K 绿条与 Takeover 1.25×、Web Audio 零报错及 Edge 硬件 WebGL 59–60 FPS 均已在 WP1/WP2/WP3 Round 2 独立验收并在本次整合构建与全量单测中零回归复跑通过。
+
+轻微建议项（非阻断，可留待后续迭代优化）：
+- 【建议 1：超级抢十开局横幅文案精细化】`client/src/ui/HudView.ts` 中 `KEY_POINT_LABELS.TIEBREAK` 固定显示 `TIEBREAK · 抢七局`，在「超级抢十（`SUPER TB`）」模式下开局也会展示该文案（见 `e2e01-rematch-started.png`），后续可按 `score.format === 'super_tiebreak'` 区分展示 `SUPER TIEBREAK · 超级抢十`。
+- 【建议 2：大厅 `waiting` 阶段刷新重连体验】`GameApp.ts` 收到 `FULL_SYNC` 时默认隐藏大厅切入比赛 HUD；正常对局中刷新重连体验完美，若在尚未开赛的 `waiting` 房间内刷新页面，可判断 `snapshot.phase === 'waiting'` 保持在大厅等待视图。
+
+未验证项（非门槛 / 环境限制）：
+- **真机 Mac Retina 2x 物理屏、真 120Hz/144Hz 物理刷新率观感与真实公网高丢包环境**：当前 Windows 本地测试环境无法复现，DPR 封顶 `2.0`、自动降档/最多回升 1 次、`>105Hz` 限帧逻辑及 4s 断线重连/15s 弃权已通过单元/集成测试与本地双会话实测闭环，真机观感与公网手感留待用户真机试玩确认。
+- **无独立 GPU headless SwiftShader 下 `E2E-01` P1 实时接发球 `W+K` 命中**：Tester 自动化浏览器运行于软件 WebGL（5–8 FPS），脚本发球接球时机 3 次尝试未在实时帧中挥中来球；`W+K` 镜像符号公式 `forwardAimZ = -aimZ * side` 与放小球落点已由代码审、WP1 镜像单测、WP3 联机集成测试及 `E2E-01/02/03` 实测数据完整覆盖。
+
+给用户的摘要：
+《Court 2K：大满贯时代》V1 整合分支（`integration/v1 @ 270b3ef`）整体评审通过（`PASS`）。全仓库 50/50 单元与集成测试、163.88 KB 生产构建、16 并发房间 60Hz 压测（平均 tick 0.669 ms、峰值内存 94.82 MB）以及双独立浏览器会话实机联调 `E2E-01 ~ E2E-04` 全部达标：双端近端镜像视角、联机手动暂停与 3s 恢复、Fast4 完局与超级抢十赛后 Rematch、双端同步 3D 鹰眼、4s 刷新重连保分且按键零失灵、15s 超时弃权结算及 `/tennis/` 子路径反代均零报错闭环。仅发现 2 处不影响交付的轻微建议项（超级抢十横幅仍显示「抢七局」文案、未开赛等待房刷新场景），真机 Mac Retina / 120Hz 观感按规格留待真机试玩确认。
+
+Notion 一行摘要：
+PASS（Integration Round 1） / 整合分支 270b3ef 全量 50/50 测试、16 房压测（0.669ms / 94.82MB）及双会话 E2E-01~04（镜像/暂停/Rematch/鹰眼/4s重连/15s弃权//tennis/反代）全量零报错通过 / 可推进至 CI 核验与用户授权交付

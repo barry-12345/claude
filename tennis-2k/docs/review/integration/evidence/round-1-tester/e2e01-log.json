@@ -1,0 +1,590 @@
+{
+  "pids": {
+    "serverPid": 15976,
+    "clientPid": 31612
+  },
+  "errors": {
+    "p0Console": [],
+    "p1Console": [],
+    "p0PageErr": [],
+    "p1PageErr": [],
+    "http4xx5xx": []
+  },
+  "steps": {
+    "step1_init": {
+      "p0": {
+        "hasTestHook": false,
+        "netdebugHiddenClass": true,
+        "netdebugDisplay": "none"
+      },
+      "p1": {
+        "hasTestHook": false,
+        "netdebugHiddenClass": true,
+        "netdebugDisplay": "none"
+      }
+    },
+    "step1_lobby": {
+      "roomCode": "Q9GX",
+      "fast4Started": true,
+      "p0Score": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+        "rows": [
+          {
+            "isServer": false,
+            "name": "对手 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": true,
+            "name": "你 (底线重炮)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [3]",
+        "modalVisible": false,
+        "modalTitle": "",
+        "modalText": "",
+        "callout": ""
+      },
+      "p1Score": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+        "rows": [
+          {
+            "isServer": true,
+            "name": "对手 (底线重炮)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": false,
+            "name": "你 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [3]",
+        "modalVisible": false,
+        "modalTitle": "",
+        "modalText": "",
+        "callout": ""
+      }
+    },
+    "step2_mirror": {
+      "calloutDuringRally": {
+        "p0": {
+          "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+          "rows": [
+            {
+              "isServer": false,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": true,
+              "name": "你 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            }
+          ],
+          "pauseBtn": "⏸ 暂停 (Esc) [3]",
+          "modalVisible": false,
+          "modalTitle": "",
+          "modalText": "",
+          "callout": ""
+        },
+        "p1": {
+          "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+          "rows": [
+            {
+              "isServer": true,
+              "name": "对手 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": false,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            }
+          ],
+          "pauseBtn": "⏸ 暂停 (Esc) [3]",
+          "modalVisible": false,
+          "modalTitle": "",
+          "modalText": "",
+          "callout": ""
+        }
+      },
+      "afterPoint": {
+        "p0": {
+          "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+          "rows": [
+            {
+              "isServer": false,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": true,
+              "name": "你 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            }
+          ],
+          "pauseBtn": "⏸ 暂停 (Esc) [3]",
+          "modalVisible": false,
+          "modalTitle": "",
+          "modalText": "",
+          "callout": ""
+        },
+        "p1": {
+          "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+          "rows": [
+            {
+              "isServer": true,
+              "name": "对手 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": false,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            }
+          ],
+          "pauseBtn": "⏸ 暂停 (Esc) [3]",
+          "modalVisible": false,
+          "modalTitle": "",
+          "modalText": "",
+          "callout": ""
+        }
+      }
+    },
+    "step3_pause_resume": {
+      "pauseP0": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+        "rows": [
+          {
+            "isServer": false,
+            "name": "对手 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": true,
+            "name": "你 (底线重炮)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [2]",
+        "modalVisible": true,
+        "modalTitle": "比赛已暂停",
+        "modalText": "比赛已暂停\n          \n            发起方：你 · 剩余手动暂停次数：你 2 次 / 对手 3 次\n          \n          60s\n          \n            继续比赛 (Esc)\n            返回大厅",
+        "callout": ""
+      },
+      "pauseP1": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+        "rows": [
+          {
+            "isServer": true,
+            "name": "对手 (底线重炮)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": false,
+            "name": "你 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [3]",
+        "modalVisible": true,
+        "modalTitle": "比赛已暂停",
+        "modalText": "比赛已暂停\n          \n            发起方：对手 · 剩余手动暂停次数：你 3 次 / 对手 2 次\n          \n          60s\n          \n            继续比赛 (Esc)\n            返回大厅",
+        "callout": ""
+      },
+      "resumingModalP0": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+        "rows": [
+          {
+            "isServer": false,
+            "name": "对手 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": true,
+            "name": "你 (底线重炮)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [2]",
+        "modalVisible": true,
+        "modalTitle": "准备恢复比赛",
+        "modalText": "准备恢复比赛\n          3\n          倒计时结束即刻恢复，请做好接球准备",
+        "callout": ""
+      },
+      "resumingModalP1": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+        "rows": [
+          {
+            "isServer": true,
+            "name": "对手 (底线重炮)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": false,
+            "name": "你 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [3]",
+        "modalVisible": true,
+        "modalTitle": "准备恢复比赛",
+        "modalText": "准备恢复比赛\n          3\n          倒计时结束即刻恢复，请做好接球准备",
+        "callout": ""
+      },
+      "afterResumeShot": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+        "rows": [
+          {
+            "isServer": false,
+            "name": "对手 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": true,
+            "name": "你 (底线重炮)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [2]",
+        "modalVisible": false,
+        "modalTitle": "准备恢复比赛",
+        "modalText": "准备恢复比赛\n          1\n          倒计时结束即刻恢复，请做好接球准备",
+        "callout": "LATE · 182 km/h"
+      }
+    },
+    "step4_fast4_game": {
+      "ok": true,
+      "iterations": 5,
+      "sb0": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+        "rows": [
+          {
+            "isServer": true,
+            "name": "对手 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          },
+          {
+            "isServer": false,
+            "name": "你 (底线重炮)",
+            "games": "1",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [2]",
+        "modalVisible": false,
+        "modalTitle": "准备恢复比赛",
+        "modalText": "准备恢复比赛\n          1\n          倒计时结束即刻恢复，请做好接球准备",
+        "callout": "ACE! 发球直接得分"
+      },
+      "sb1": {
+        "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+        "rows": [
+          {
+            "isServer": false,
+            "name": "对手 (底线重炮)",
+            "games": "1",
+            "points": "0"
+          },
+          {
+            "isServer": true,
+            "name": "你 (防守磨王)",
+            "games": "0",
+            "points": "0"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [3]",
+        "modalVisible": false,
+        "modalTitle": "准备恢复比赛",
+        "modalText": "准备恢复比赛\n          1\n          倒计时结束即刻恢复，请做好接球准备",
+        "callout": "ACE! 发球直接得分"
+      },
+      "events": [
+        {
+          "iter": 0,
+          "callout": "LATE · 180 km/h",
+          "s0": [
+            {
+              "isServer": false,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            },
+            {
+              "isServer": true,
+              "name": "你 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            }
+          ],
+          "s1": [
+            {
+              "isServer": true,
+              "name": "对手 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": false,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            }
+          ]
+        },
+        {
+          "iter": 1,
+          "callout": "PERFECT · 222 km/h",
+          "s0": [
+            {
+              "isServer": false,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            },
+            {
+              "isServer": true,
+              "name": "你 (底线重炮)",
+              "games": "0",
+              "points": "15"
+            }
+          ],
+          "s1": [
+            {
+              "isServer": true,
+              "name": "对手 (底线重炮)",
+              "games": "0",
+              "points": "15"
+            },
+            {
+              "isServer": false,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            }
+          ]
+        },
+        {
+          "iter": 2,
+          "callout": "PERFECT · 222 km/h",
+          "s0": [
+            {
+              "isServer": false,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            },
+            {
+              "isServer": true,
+              "name": "你 (底线重炮)",
+              "games": "0",
+              "points": "30"
+            }
+          ],
+          "s1": [
+            {
+              "isServer": true,
+              "name": "对手 (底线重炮)",
+              "games": "0",
+              "points": "30"
+            },
+            {
+              "isServer": false,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            }
+          ]
+        },
+        {
+          "iter": 3,
+          "callout": "PERFECT · 222 km/h",
+          "s0": [
+            {
+              "isServer": false,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            },
+            {
+              "isServer": true,
+              "name": "你 (底线重炮)",
+              "games": "0",
+              "points": "40"
+            }
+          ],
+          "s1": [
+            {
+              "isServer": true,
+              "name": "对手 (底线重炮)",
+              "games": "0",
+              "points": "40"
+            },
+            {
+              "isServer": false,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "15"
+            }
+          ]
+        },
+        {
+          "iter": 4,
+          "callout": "PERFECT · 222 km/h",
+          "s0": [
+            {
+              "isServer": true,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": false,
+              "name": "你 (底线重炮)",
+              "games": "1",
+              "points": "0"
+            }
+          ],
+          "s1": [
+            {
+              "isServer": false,
+              "name": "对手 (底线重炮)",
+              "games": "1",
+              "points": "0"
+            },
+            {
+              "isServer": true,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            }
+          ]
+        }
+      ]
+    },
+    "step5_super_tb_rematch": {
+      "tbCode": "EZC5",
+      "pauseBeforeWin": "⏸ 暂停 (Esc) [2]",
+      "tbOver": true,
+      "tbIters": 15,
+      "matchOverP0": {
+        "head": "硬地 · 美网蓝绿\n            SUPER TB · 一发",
+        "rows": [
+          {
+            "isServer": false,
+            "name": "对手 (防守磨王)",
+            "games": "0",
+            "points": "2"
+          },
+          {
+            "isServer": true,
+            "name": "你 (底线重炮)",
+            "games": "1",
+            "points": "10"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [2]",
+        "modalVisible": true,
+        "modalTitle": "🏆 胜利！MATCH WINNER",
+        "modalText": "🏆 胜利！MATCH WINNER\n          \n          10 - 2\n          \n            \n              你2K 赛后统计对手\n            \n            \n              4Ace 发球直接得分0\n              2双误 (Double Faults)6\n              67%一发成功率0%\n              4制胜分 (Winners)0\n              0非受迫失误 (UE)0\n              25%Perfect 绿条率0%\n            \n          \n          \n            再来一局 (Rematch)\n            返回大厅",
+        "callout": ""
+      },
+      "matchOverP1": {
+        "head": "硬地 · 美网蓝绿\n            SUPER TB · 一发",
+        "rows": [
+          {
+            "isServer": true,
+            "name": "对手 (底线重炮)",
+            "games": "1",
+            "points": "10"
+          },
+          {
+            "isServer": false,
+            "name": "你 (防守磨王)",
+            "games": "0",
+            "points": "2"
+          }
+        ],
+        "pauseBtn": "⏸ 暂停 (Esc) [3]",
+        "modalVisible": true,
+        "modalTitle": "比赛结束 · DEFEAT",
+        "modalText": "比赛结束 · DEFEAT\n          \n          2 - 10\n          \n            \n              你2K 赛后统计对手\n            \n            \n              0Ace 发球直接得分4\n              6双误 (Double Faults)2\n              0%一发成功率67%\n              0制胜分 (Winners)4\n              0非受迫失误 (UE)0\n              0%Perfect 绿条率25%\n            \n          \n          \n            再来一局 (Rematch)\n            返回大厅",
+        "callout": ""
+      },
+      "rematchRes": {
+        "p1BtnAfterP0": "对手已邀请 · 点击再来一局",
+        "p0AfterRematch": {
+          "head": "硬地 · 美网蓝绿\n            SUPER TB · 一发",
+          "rows": [
+            {
+              "isServer": false,
+              "name": "对手 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": true,
+              "name": "你 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            }
+          ],
+          "pauseBtn": "⏸ 暂停 (Esc) [3]",
+          "modalVisible": false,
+          "modalTitle": "🏆 胜利！MATCH WINNER",
+          "modalText": "🏆 胜利！MATCH WINNER\n          \n          10 - 2\n          \n            \n              你2K 赛后统计对手\n            \n            \n              4Ace 发球直接得分0\n              2双误 (Double Faults)6\n              67%一发成功率0%\n              4制胜分 (Winners)0\n              0非受迫失误 (UE)0\n              25%Perfect 绿条率0%\n            \n          \n          \n            已确认，等待对手...\n            返回大厅",
+          "callout": ""
+        },
+        "p1AfterRematch": {
+          "head": "硬地 · 美网蓝绿\n            SUPER TB · 一发",
+          "rows": [
+            {
+              "isServer": true,
+              "name": "对手 (底线重炮)",
+              "games": "0",
+              "points": "0"
+            },
+            {
+              "isServer": false,
+              "name": "你 (防守磨王)",
+              "games": "0",
+              "points": "0"
+            }
+          ],
+          "pauseBtn": "⏸ 暂停 (Esc) [3]",
+          "modalVisible": false,
+          "modalTitle": "比赛结束 · DEFEAT",
+          "modalText": "比赛结束 · DEFEAT\n          \n          2 - 10\n          \n            \n              你2K 赛后统计对手\n            \n            \n              0Ace 发球直接得分4\n              6双误 (Double Faults)2\n              0%一发成功率67%\n              0制胜分 (Winners)4\n              0非受迫失误 (UE)0\n              0%Perfect 绿条率25%\n            \n          \n          \n            对手已邀请 · 点击再来一局\n            返回大厅",
+          "callout": ""
+        }
+      }
+    }
+  },
+  "serverLogTail": "[court2k-server] listening on http://127.0.0.1:4522 (wsPath=/ws, testHooks=false)\n",
+  "clientLogTail": "\u001b[2m1:54:18 AM\u001b[22m \u001b[36m\u001b[1m[vite]\u001b[22m\u001b[39m \u001b[90m\u001b[2m(client)\u001b[22m\u001b[39m Re-optimizing dependencies because vite config has changed\n\n  \u001b[32m\u001b[1mVITE\u001b[22m v7.3.8\u001b[39m  \u001b[2mready in \u001b[0m\u001b[1m417\u001b[22m\u001b[2m\u001b[0m ms\u001b[22m\n\n  \u001b[32m➜\u001b[39m  \u001b[1mLocal\u001b[22m:   \u001b[36mhttp://127.0.0.1:\u001b[1m4521\u001b[22m/\u001b[39m\n"
+}

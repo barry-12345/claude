@@ -1,0 +1,47 @@
+{
+  "pids": {
+    "serverPid": 10552,
+    "proxySelfPid": 48952
+  },
+  "errors": {
+    "p0Console": [],
+    "p1Console": [],
+    "p0PageErr": [],
+    "p1PageErr": [],
+    "http4xx5xx": []
+  },
+  "network": {
+    "requestsCount": 8,
+    "wsUrls": [
+      {
+        "who": "p0",
+        "url": "ws://127.0.0.1:4523/tennis/ws"
+      },
+      {
+        "who": "p1",
+        "url": "ws://127.0.0.1:4523/tennis/ws"
+      }
+    ],
+    "root404Check": 404,
+    "healthCheck": {
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "rooms": 0,
+        "uptimeSec": 0,
+        "rssMb": 60.7
+      }
+    }
+  },
+  "steps": {
+    "step1_single": {
+      "hasTestHook": false,
+      "netDebugText": "NET / PERF DEBUG\n      Mode: single\n      FPS: 8 | Max: 966.6ms\n      Avg: 128.8ms | P95: 356.8ms\n      Tier: MEDIUM (Up: 0/1)\n      ActiveDPR: 1.00\n      DrawCalls: 100\n      EstHz: 60Hz (Uncapped)\n      RTT: 0ms | Reconn: 0"
+    },
+    "step2_online": {
+      "roomCode": "MX5Y",
+      "netDebugP0": "NET / PERF DEBUG\n      Mode: online\n      FPS: 8 | Max: 575.1ms\n      Avg: 129.6ms | P95: 233.4ms\n      Tier: LOW (Up: 0/1)\n      ActiveDPR: 1.00\n      DrawCalls: 100\n      EstHz: 60Hz (Uncapped)\n      RTT: 1ms | Reconn: 0",
+      "netDebugP1": "NET / PERF DEBUG\n      Mode: online\n      FPS: 5 | Max: 4233.3ms\n      Avg: 284.6ms | P95: 409.6ms\n      Tier: MEDIUM (Up: 0/1)\n      ActiveDPR: 1.00\n      DrawCalls: 100\n      EstHz: 60Hz (Uncapped)\n      RTT: 4ms | Reconn: 0"
+    }
+  }
+}

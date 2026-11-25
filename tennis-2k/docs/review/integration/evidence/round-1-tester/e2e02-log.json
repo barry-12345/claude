@@ -1,0 +1,98 @@
+{
+  "pids": {
+    "serverPid": 22800,
+    "clientPid": 56940
+  },
+  "errors": {
+    "p0Console": [],
+    "p1Console": [],
+    "p0PageErr": [],
+    "p1PageErr": [],
+    "http4xx5xx": []
+  },
+  "steps": {
+    "hawkeye_8cm_in": {
+      "roomCode": "CGQ4",
+      "durationMs": 1882,
+      "p0": {
+        "phase": "hawkeye",
+        "hawkeye": {
+          "active": true,
+          "elapsedSec": 0,
+          "durationSec": 1.8,
+          "bouncePos": {
+            "x": 4.042322686177038,
+            "y": 0.0335,
+            "z": -7.536260894411761
+          },
+          "isIn": true,
+          "distanceToLineCm": 7.27,
+          "lineType": "sideline"
+        },
+        "banner": ""
+      },
+      "p1": {
+        "phase": "hawkeye",
+        "hawkeye": {
+          "active": true,
+          "elapsedSec": 0,
+          "durationSec": 1.8,
+          "bouncePos": {
+            "x": -4.042322686177038,
+            "y": 0.0335,
+            "z": 7.536260894411761
+          },
+          "isIn": true,
+          "distanceToLineCm": 7.27,
+          "lineType": "sideline"
+        },
+        "banner": ""
+      },
+      "postEndReset": {
+        "p0LastReset": "HAWKEYE_END",
+        "p1LastReset": "HAWKEYE_END",
+        "p0PosXBefore": -1.45,
+        "p0PosXAfter": -0.6088317988063326,
+        "p1PosXBefore": -2.15,
+        "p1PosXAfter": -0.34774554525840035
+      }
+    },
+    "hawkeye_10cm_out": {
+      "p0": {
+        "hawkeye": {
+          "active": true,
+          "elapsedSec": 0.03333333333333333,
+          "durationSec": 1.8,
+          "bouncePos": {
+            "x": 1.1989922144447178,
+            "y": 0.0335,
+            "z": -11.956674927236838
+          },
+          "isIn": false,
+          "distanceToLineCm": 7.17,
+          "lineType": "baseline"
+        },
+        "banner": "\n          HAWKEYE 3D 鹰眼挑战\n          IN · 界内\n          单打边线 · 距线 7.3 cm\n        "
+      },
+      "p1": {
+        "hawkeye": {
+          "active": true,
+          "elapsedSec": 0.03333333333333333,
+          "durationSec": 1.8,
+          "bouncePos": {
+            "x": -1.1989922144447178,
+            "y": 0.0335,
+            "z": 11.956674927236838
+          },
+          "isIn": false,
+          "distanceToLineCm": 7.17,
+          "lineType": "baseline"
+        },
+        "banner": "\n          HAWKEYE 3D 鹰眼挑战\n          OUT · 出界\n          底线 · 距线 7.2 cm\n        "
+      }
+    },
+    "hawkeye_25cm_negative": {
+      "hawkeyeTriggered": false
+    }
+  }
+}
