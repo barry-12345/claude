@@ -620,16 +620,23 @@ describe('@court2k/server integration suite', () => {
     expect(
       forfeitEvt.payload.event.type === 'MATCH_OVER' && forfeitEvt.payload.event.forfeitedBy
     ).toBe(1);
+    const forfeitSnap = await p0Rec.waitFor(
+      'STATE_SNAPSHOT',
+      (m) => m.payload.state.phase === 'match_over'
+    );
+    expect(forfeitSnap.payload.state.phase).toBe('match_over');
+    expect(forfeitSnap.payload.state.score.winner).toBe(0);
     expect(p0Rec.messages.filter((m) => m.type === 'ERROR').length).toBe(0);
 
-    // Reconnect P1 in match_over, then Rematch
+    // P0 requests rematch BEFORE P1 reconnects; P1 reconnects in match_over and receives REMATCH_STATUS
+    p0Rec.send({ type: 'REMATCH_REQUEST', payload: {} });
+    await p0Rec.waitFor('REMATCH_STATUS', (m) => m.payload.requested[0] === true);
+
     const p1After = await connectClient(wsUrl);
     p1After.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p1Token } });
     await p1After.waitFor('FULL_SYNC');
-
-    p0Rec.send({ type: 'REMATCH_REQUEST', payload: {} });
-    const remStatus = await p1After.waitFor('REMATCH_STATUS');
-    expect(remStatus.payload.requested).toEqual([true, false]);
+    const recRematchStatus = await p1After.waitFor('REMATCH_STATUS');
+    expect(recRematchStatus.payload.requested).toEqual([true, false]);
 
     // Duplicate click is idempotent
     p0Rec.send({ type: 'REMATCH_REQUEST', payload: {} });
@@ -672,5 +679,95 @@ describe('@court2k/server integration suite', () => {
     await p2.close();
     await new Promise((r) => setTimeout(r, 250));
     expect(server.roomManager.getRoomCount()).toBe(0);
+  });
+
+  it('clears residual held inputs on point_over/hawkeye transition to serve_ready (no ghost serve)', async () => {
+    const { wsUrl } = await startTestServer({ enableTestHooks: true });
+    const { p0 } = await createStartedRoom(wsUrl);
+
+    // Launch a hawkeye 25cm out ball so phase enters rally -> point_over -> serve_ready
+    p0.send({
+      type: 'TEST_COMMAND',
+      payload: { cmd: 'trigger_hawkeye', args: { inBounds: false, distCm: 25, line: 'sideline' } },
+    });
+    await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.state.phase === 'rally');
+
+    // Hold J during rally right before point ends
+    p0.send({
+      type: 'PLAYER_INPUT',
+      payload: {
+        seq: 1,
+        moveX: 0,
+        moveZ: 0,
+        aimX: 0,
+        aimZ: 0,
+        action: 'J',
+        phase: 'hold',
+        clientTime: Date.now(),
+      },
+    });
+
+    await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.state.phase === 'point_over');
+
+    // Release during point_over (which server ignores) and then send nothing
+    p0.send({
+      type: 'PLAYER_INPUT',
+      payload: {
+        seq: 2,
+        moveX: 0,
+        moveZ: 0,
+        aimX: 0,
+        aimZ: 0,
+        action: 'none',
+        phase: 'release',
+        clientTime: Date.now(),
+      },
+    });
+
+    await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.state.phase === 'serve_ready');
+    p0.clearMessages();
+
+    // Hold still >= 1.5s without sending any new key; must stay in serve_ready with 0 ghost shots
+    await new Promise((r) => setTimeout(r, 1600));
+    const snaps = p0.messages.filter((m) => m.type === 'STATE_SNAPSHOT');
+    expect(snaps.length).toBeGreaterThan(0);
+    for (const s of snaps) {
+      if (s.type === 'STATE_SNAPSHOT') {
+        expect(s.payload.state.phase).toBe('serve_ready');
+      }
+    }
+    const shotHits = p0.messages.filter(
+      (m) => m.type === 'GAME_EVENT' && m.payload.event.type === 'SHOT_HIT'
+    );
+    expect(shotHits.length).toBe(0);
+  }, 15_000);
+
+  it('preserves host binding on self JOIN_ROOM and resets pause.disconnected on waiting reconnect', async () => {
+    const { wsUrl } = await startTestServer();
+    const p0 = await connectClient(wsUrl);
+    p0.send({
+      type: 'CREATE_ROOM',
+      payload: { court: 'hard', format: 'fast4', archetype: 'allcourt' },
+    });
+    const created = await p0.waitFor('ROOM_CREATED');
+    const roomCode = created.payload.roomCode;
+    const token0 = created.payload.sessionToken;
+
+    // Host sends JOIN_ROOM to own room -> rejected with INVALID_PHASE without detaching host
+    p0.send({ type: 'JOIN_ROOM', payload: { roomCode, archetype: 'power' } });
+    expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_PHASE');
+
+    // Verify host is still attached by sending READY
+    p0.send({ type: 'READY', payload: { ready: true } });
+    const lobby = await p0.waitFor('LOBBY_UPDATE');
+    expect(lobby.payload.connected).toEqual([true, false]);
+    expect(lobby.payload.ready).toEqual([true, false]);
+
+    // Host disconnects in waiting, then reconnects -> FULL_SYNC snapshot must have disconnected[0] === false
+    await p0.close();
+    const p0Rec = await connectClient(wsUrl);
+    p0Rec.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: token0 } });
+    const sync = await p0Rec.waitFor('FULL_SYNC');
+    expect(sync.payload.snapshot.pause.disconnected[0]).toBe(false);
   });
 });

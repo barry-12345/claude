@@ -175,6 +175,16 @@ export class RoomManager {
         sendError(ws, 'ROOM_NOT_FOUND', '房间不存在');
         return;
       }
+      const existingBinding = this.bindings.get(ws);
+      if (existingBinding && existingBinding.roomCode === room.code) {
+        sendError(ws, 'INVALID_PHASE', '已在目标房间中');
+        return;
+      }
+      const preCheck = room.canJoinGuest();
+      if (!preCheck.ok) {
+        sendError(ws, preCheck.code, preCheck.message);
+        return;
+      }
       this.detachSocket(ws, nowMs);
       const res = room.joinGuest(ws, msg.payload.archetype, nowMs);
       if (!res.ok) {

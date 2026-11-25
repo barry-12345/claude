@@ -1,0 +1,16 @@
+﻿=== 1. Check imports in server/src (no deep shared/src imports) ===
+OK: 0 deep imports of shared/src
+
+=== 2. Production node dist/index.js boot + /health + /tennis/health check (PORT=3301) ===
+Started server PID: 44900
+GET /health -> 200 {"status":"ok","rooms":0,"uptimeSec":0,"rssMb":51.7}
+GET /tennis/health -> 200 {"status":"ok","rooms":0,"uptimeSec":0,"rssMb":52.3}
+Stopped verified server PID: 44900
+
+=== 3. git status & branch check ===
+wp3/server
+ M tennis-2k/server/src/room.ts
+ M tennis-2k/server/src/roomManager.ts
+ M tennis-2k/server/tests/server.integration.test.ts
+?? tennis-2k/docs/review/wp3/evidence/round-2/
+?? tennis-2k/docs/review/wp3/round-1.md

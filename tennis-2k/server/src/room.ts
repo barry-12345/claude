@@ -187,13 +187,21 @@ export class Room {
     });
   }
 
-  joinGuest(guestWs: WebSocket, archetype: ArchetypeId, nowMs: number): { ok: true } | { ok: false; code: ErrorCode; message: string } {
-    this.touch(nowMs);
+  canJoinGuest(): { ok: true } | { ok: false; code: ErrorCode; message: string } {
     if (this.state.phase !== 'waiting') {
       return { ok: false, code: 'MATCH_ALREADY_STARTED', message: '比赛已开始' };
     }
     if (this.connected[1]) {
       return { ok: false, code: 'ROOM_FULL', message: '房间已满' };
+    }
+    return { ok: true };
+  }
+
+  joinGuest(guestWs: WebSocket, archetype: ArchetypeId, nowMs: number): { ok: true } | { ok: false; code: ErrorCode; message: string } {
+    this.touch(nowMs);
+    const check = this.canJoinGuest();
+    if (!check.ok) {
+      return check;
     }
 
     const token = generateSessionToken();
@@ -248,6 +256,8 @@ export class Room {
     const side: PlayerSide = idx === 0 ? 1 : -1;
 
     if (this.state.phase === 'waiting') {
+      const rec = applyReconnect(this.state, idx);
+      this.state = rec.state;
       sendServerMessage(ws, {
         type: 'FULL_SYNC',
         payload: {
@@ -276,6 +286,16 @@ export class Room {
         requireInputReset: true,
       },
     });
+
+    if (
+      this.state.phase === 'match_over' &&
+      (this.rematchRequested[0] || this.rematchRequested[1])
+    ) {
+      sendServerMessage(ws, {
+        type: 'REMATCH_STATUS',
+        payload: { requested: [this.rematchRequested[0], this.rematchRequested[1]] },
+      });
+    }
 
     if (wasPausedDisconnect && rec.bothConnected) {
       this.broadcast({
@@ -695,7 +715,15 @@ export class Room {
     this.state = nextState;
 
     let phaseChanged = nextState.phase !== prevPhase;
-    let suppressSnapshotOnForfeit = false;
+    if (
+      phaseChanged &&
+      (nextState.phase === 'serve_ready' ||
+        nextState.phase === 'point_over' ||
+        nextState.phase === 'hawkeye' ||
+        nextState.phase === 'match_over')
+    ) {
+      this.clearInputs();
+    }
 
     for (const evt of events) {
       if (evt.type === 'PAUSE_TIMEOUT_RESUMING') {
@@ -722,12 +750,7 @@ export class Room {
         phaseChanged = true;
         continue;
       }
-      if (evt.type === 'MATCH_OVER' && evt.reason === 'forfeit') {
-        suppressSnapshotOnForfeit = true;
-        if (this.bothDisconnected) {
-          this.emptySinceMs = nowMs;
-        }
-      } else if (evt.type === 'MATCH_OVER') {
+      if (evt.type === 'MATCH_OVER') {
         if (this.bothDisconnected) {
           this.emptySinceMs = nowMs;
         }
@@ -740,10 +763,6 @@ export class Room {
       const discIdx: PlayerIndex = nextState.pause.initiatedBy ?? (nextState.pause.disconnected[0] ? 0 : 1);
       this.clearInputs();
       this.emitDisconnectPaused(discIdx, nowMs);
-      return;
-    }
-
-    if (suppressSnapshotOnForfeit) {
       return;
     }
 
