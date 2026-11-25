@@ -3,6 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "stress": "tsx scripts/stress-16rooms.ts"
+  },
   "dependencies": {
     "@court2k/shared": "*",
     "ws": "^8.18.1"
