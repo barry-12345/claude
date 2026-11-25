@@ -1,0 +1,24 @@
+﻿
+> @court2k/server@1.0.0 typecheck
+> tsc -p tsconfig.test.json --noEmit
+
+
+> @court2k/server@1.0.0 build
+> tsc -p tsconfig.json
+
+
+> @court2k/server@1.0.0 test
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90mD:/court2k-work/wt-wp3/tennis-2k/server[39m
+
+ [32m✓[39m tests/server.integration.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 5929[2mms[22m[39m
+   [33m[2m✓[22m[39m @court2k/server integration suite[2m > [22mruns 60Hz authoritative simulation, 30Hz snapshots, mirrored inputs, and hawkeye test hook [33m 4827[2mms[22m[39m
+   [33m[2m✓[22m[39m @court2k/server integration suite[2m > [22menforces manual pause 3x limit, 60s timeout auto-resume, 3s countdown, 5Hz pause snapshots, and race handling [33m 606[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m   Start at [22m 00:52:33
+[2m   Duration [22m 6.88s[2m (transform 238ms, setup 0ms, collect 374ms, tests 5.93s, environment 0ms, prepare 175ms)[22m
+
