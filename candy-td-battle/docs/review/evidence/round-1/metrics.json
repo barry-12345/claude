@@ -1,0 +1,22 @@
+{
+  "pids": {
+    "serverProd": 27304,
+    "serverTest": 1972,
+    "edge": 47308
+  },
+  "prodTestHookUndefined": true,
+  "lobbyVisible": true,
+  "prodAfterPlay": {
+    "gold": "$12",
+    "eco": "Eco +30/6s",
+    "wave": "波次 1/15 · 22s"
+  },
+  "peekBannerVisible": true,
+  "externalRequests": [],
+  "prodConsoleErrors": [],
+  "testHookMounted": true,
+  "peekClickBlocked": true,
+  "netdebugText": "FPS: 60\nRender: 0.40 ms\nRTT: 1 ms\nServerTick: 0.1 ms\nDPR: 2\nEntities(怪/弹/粒): 36/4/62",
+  "overtimeBannerVisible": true,
+  "testConsoleErrors": []
+}

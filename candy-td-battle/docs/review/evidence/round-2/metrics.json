@@ -1,0 +1,19 @@
+{
+  "pids": {
+    "serverTest": 46240,
+    "edge": 49140
+  },
+  "popoverOpenedBeforePeek": true,
+  "popoverHiddenDuringPeekAfter1200ms": true,
+  "peekActiveAtRightEdge": true,
+  "peekExitedCleanly": true,
+  "twoExpressBannerText": "🚚 糖果快递即将送达！(1.2s · 共 2 辆排队)",
+  "winLoseEventsCount": 1,
+  "winLoseEventName": "win",
+  "rematchCleanTick": {
+    "tick": 5,
+    "towers": 0,
+    "hp": 20
+  },
+  "consoleErrors": []
+}

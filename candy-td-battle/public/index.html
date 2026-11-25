@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>糖果塔防对战 · Candy TD Battle</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div id="app-viewport">
+    <div id="stage" class="stage">
+      <canvas id="game-canvas" width="1280" height="720"></canvas>
+
+      <!-- Top HUD Bar (y: 0..56) -->
+      <header id="top-bar" class="top-bar hidden">
+        <div class="hud-left">
+          <div class="hud-pill pill-hp" title="己方生命值">
+            <span class="pill-icon">❤️</span>
+            <span id="hud-self-hp">20/20</span>
+          </div>
+          <div class="hud-pill pill-gold" title="当前金币">
+            <span class="pill-icon">💰</span>
+            <span id="hud-self-gold">$320</span>
+          </div>
+          <div class="hud-pill pill-eco" title="每 6 秒发放永久经济">
+            <span class="pill-icon">📈</span>
+            <span id="hud-self-eco">Eco +25/6s</span>
+            <span class="eco-progress-track"><span id="hud-eco-bar" class="eco-progress-fill"></span></span>
+          </div>
+          <div class="hud-pill pill-wave" id="hud-wave-pill">
+            <span class="pill-icon">🌊</span>
+            <span id="hud-wave-text">准备中 · 5s</span>
+          </div>
+        </div>
+
+        <div class="hud-center-right">
+          <div class="opp-bar" id="opp-status-bar">
+            <span class="opp-tag">对手</span>
+            <strong id="hud-opp-name">甜心对手</strong>
+            <span class="opp-sep">|</span>
+            <span>❤️ <b id="hud-opp-hp">20</b></span>
+            <span class="opp-sep">|</span>
+            <span>📈 <b id="hud-opp-eco">+25</b></span>
+            <span class="opp-sep">|</span>
+            <span id="hud-opp-alert-lamp" class="alert-lamp">🚚 待命</span>
+          </div>
+          <div id="outgoing-express-pill" class="outgoing-pill hidden"></div>
+        </div>
+
+        <div class="hud-actions">
+          <button id="btn-mute" class="icon-btn" title="音效开关">🔊</button>
+          <button id="btn-help" class="icon-btn" title="玩法说明">❓</button>
+        </div>
+      </header>
+
+      <!-- Peek Banner (visible when peeking) -->
+      <div id="peek-banner" class="peek-banner hidden">
+        👀 正在偷看对手战场（移开鼠标或松开 Space 立即回防）
+      </div>
+
+      <!-- Incoming Express Alert Banner -->
+      <div id="incoming-express-banner" class="express-banner hidden"></div>
+
+      <!-- Overtime Banner -->
+      <div id="overtime-banner" class="overtime-banner hidden">
+        🌈 糖果狂热加时赛！第 <span id="overtime-wave-num">16</span> 波彩虹大军来袭！
+      </div>
+
+      <!-- Right Edge Peek Hotzone (x: 1204..1276, y: 180..540) -->
+      <div id="peek-zone" class="peek-zone hidden" title="悬停或按住 Space 偷看对手布局">
+        <span class="peek-eye">👀</span>
+        <span class="peek-label">偷<br />看<br />对<br />手</span>
+        <span class="peek-kbd">Space</span>
+      </div>
+
+      <!-- Tower Selection Floating Card -->
+      <div id="tower-popover" class="tower-popover hidden">
+        <div class="tp-header">
+          <span id="tp-title">草莓豆豆炮 Lv.1</span>
+          <button id="tp-close" class="tp-close" aria-label="关闭">×</button>
+        </div>
+        <div id="tp-stats" class="tp-stats">射程 145 · 伤 12 · 2.4/s</div>
+        <div class="tp-targeting">
+          <span>索敌:</span>
+          <button class="tgt-btn" data-target="first">最前</button>
+          <button class="tgt-btn" data-target="strong">血厚</button>
+          <button class="tgt-btn" data-target="close">最近</button>
+        </div>
+        <div class="tp-actions">
+          <button id="tp-upgrade" class="tp-btn tp-upgrade">升级 $75</button>
+          <button id="tp-sell" class="tp-btn tp-sell">出售 +$56</button>
+        </div>
+      </div>
+
+      <!-- Bottom Dual Console (y: 584..712) -->
+      <footer id="bottom-console" class="bottom-console hidden">
+        <section class="console-build" aria-label="建造糖果塔">
+          <div class="console-section-title">🍬 建塔防御（快捷键 1-4，右键/Esc取消）</div>
+          <div id="tower-cards" class="tower-cards"></div>
+        </section>
+        <section class="console-send" aria-label="进攻派怪与快递">
+          <div class="console-section-title">🚀 进攻派怪 &amp; 快递心理战（赚永久 Eco · Q/W/E/R/T/F）</div>
+          <div id="send-cards" class="send-cards"></div>
+        </section>
+      </footer>
+
+      <!-- Toast Message -->
+      <div id="toast-container" class="toast-container"></div>
+
+      <!-- ?netdebug=1 Performance Overlay -->
+      <aside id="netdebug-panel" class="netdebug-panel hidden"></aside>
+
+      <!-- Lobby / Room Modal -->
+      <div id="lobby-overlay" class="modal-overlay">
+        <div class="lobby-card">
+          <div class="lobby-hero">
+            <div class="candy-badge">🍬 Candy TD Battle V1</div>
+            <h1>糖果塔防对战</h1>
+            <p class="lobby-subtitle">高颜值马卡龙 1v1 实时策略对战 · 建塔守糖果 · 派怪抢经济 · 假动作快递斗智</p>
+          </div>
+
+          <!-- Entry View -->
+          <div id="lobby-entry" class="lobby-section">
+            <div class="nick-row">
+              <label for="input-nickname">我的昵称</label>
+              <input id="input-nickname" type="text" maxlength="20" placeholder="草莓甜心" value="草莓甜心" />
+            </div>
+
+            <div class="mode-grid">
+              <div class="mode-box mode-pvp">
+                <h3>👫 双人好友对战</h3>
+                <p>生成 4 位房间码或分享链接，支持 20s 断线重连</p>
+                <button id="btn-create-pvp" class="btn-primary">创建双人房间</button>
+                <div class="join-row">
+                  <input id="input-room-code" type="text" maxlength="4" placeholder="输入4位码" />
+                  <button id="btn-join-pvp" class="btn-secondary">加入房间</button>
+                </div>
+              </div>
+
+              <div class="mode-box mode-ai">
+                <h3>🤖 单人 AI 陪练</h3>
+                <p>零等待立即开练！AI 与玩家同规则公平运营</p>
+                <div class="ai-buttons">
+                  <button id="btn-ai-casual" class="btn-mint">🌸 休闲甜心 AI</button>
+                  <button id="btn-ai-clever" class="btn-peach">🦊 狡黠狐狸 AI</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Waiting Room View -->
+          <div id="lobby-room" class="lobby-section hidden">
+            <div class="room-code-banner">
+              <div>
+                <span class="rc-label">房间码</span>
+                <strong id="lobby-room-code" class="rc-value">----</strong>
+              </div>
+              <button id="btn-copy-link" class="btn-secondary">🔗 一键复制邀请链接</button>
+            </div>
+
+            <div class="slots-grid">
+              <div class="slot-card" id="slot-card-0">
+                <div class="slot-avatar">🍓</div>
+                <div class="slot-info">
+                  <div class="slot-role">草莓兔阵营 (P1)</div>
+                  <div class="slot-name" id="slot-name-0">等待中...</div>
+                </div>
+                <span class="slot-ready-badge" id="slot-ready-0">未准备</span>
+              </div>
+              <div class="slot-vs">VS</div>
+              <div class="slot-card" id="slot-card-1">
+                <div class="slot-avatar">🐻</div>
+                <div class="slot-info">
+                  <div class="slot-role">薄荷熊阵营 (P2)</div>
+                  <div class="slot-name" id="slot-name-1">等待好友加入...</div>
+                </div>
+                <span class="slot-ready-badge" id="slot-ready-1">空位</span>
+              </div>
+            </div>
+
+            <div class="lobby-room-actions">
+              <button id="btn-toggle-ready" class="btn-primary">✨ 准备开战</button>
+              <button id="btn-back-home" class="btn-ghost">返回大厅</button>
+            </div>
+          </div>
+
+          <!-- Countdown View -->
+          <div id="lobby-countdown" class="lobby-section hidden">
+            <div class="countdown-circle">
+              <span id="countdown-num">3</span>
+            </div>
+            <p class="countdown-tip">糖果小车装填中，即将同步开战！</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reconnect Pause Overlay -->
+      <div id="reconnect-overlay" class="modal-overlay hidden">
+        <div class="status-card">
+          <div class="status-emoji">📡</div>
+          <h2 id="reconnect-title">对方信号飘走啦…</h2>
+          <p id="reconnect-desc">已冻结双方战场，等待重连中（剩余 <strong id="reconnect-sec">20</strong> 秒）</p>
+        </div>
+      </div>
+
+      <!-- Match Result Overlay -->
+      <div id="result-overlay" class="modal-overlay hidden">
+        <div class="result-card">
+          <div id="result-badge" class="result-badge">🏆 甜蜜胜利！</div>
+          <h2 id="result-title">你守住了糖果城堡！</h2>
+          <p id="result-reason" class="result-reason"></p>
+          <div id="result-stats-grid" class="result-stats-grid"></div>
+          <div class="result-actions">
+            <button id="btn-rematch" class="btn-primary">🔄 再来一局</button>
+            <button id="btn-result-home" class="btn-ghost">返回大厅</button>
+          </div>
+          <div id="rematch-status" class="rematch-status"></div>
+        </div>
+      </div>
+
+      <!-- Help Modal -->
+      <div id="help-overlay" class="modal-overlay hidden">
+        <div class="help-card">
+          <div class="help-header">
+            <h2>🍬 糖果塔防对战 · 快速指南</h2>
+            <button id="btn-close-help" class="tp-close">×</button>
+          </div>
+          <ul class="help-list">
+            <li><b>建塔防御（左下 1-4）</b>：草莓炮速射清杂、薄荷冰范围减速（Lv3 附带 +15% 易伤）、爆米花群伤、柠檬狙专克太妃硬糖与蛋糕王！</li>
+            <li><b>派怪涨 Eco（右下 Q/W/E/R/T/F）</b>：派怪给对手可永久增加每 6 秒发放的 Eco 经济！</li>
+            <li><b>3 秒快递 &amp; 假动作心理战</b>：真快递与 🎩 假动作在 3 秒内对对手完全同款警报！假动作只喷彩带零伤害，却能稳赚 +5 Eco 骗对手乱花钱。</li>
+            <li><b>防误触偷看对手</b>：鼠标移至最右侧「👀 偷看对手」胶囊或按住 <code>Space</code> 键平滑查看对手阵地（偷看时禁用地图点击防误建）。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "candy-td-battle",
+  "version": "1.0.0",
+  "description": "《糖果塔防对战》（Candy TD Battle）V1 — 1v1 实时策略塔防对战游戏",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "start:test": "node -e \"process.env.CANDY_ALLOW_TEST_HOOKS='1'; import('./server/index.js');\"",
+    "test": "node --test tests/sim-unit.test.js tests/ws-protocol.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  }
+}
