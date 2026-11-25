@@ -33,6 +33,7 @@ export class PerfManager {
   private hasDowngraded = false;
 
   private frames: number[] = [];
+  private renderIntervals: number[] = [];
   private downgradeAccumSec = 0;
   private upgradeAccumSec = 0;
 
@@ -116,11 +117,22 @@ export class PerfManager {
 
   /**
    * Record one rendered/simulated frame duration and evaluate adaptive tier changes.
-   * `realDeltaMs` represents actual wall-clock elapsed time for timer accumulation.
+   * - `frameWorkMs`: CPU/render work duration (or synthetic frameMs in unit tests).
+   * - `realDeltaMs`: actual wall-clock elapsed time for timer accumulation.
+   * - `renderIntervalMs`: optional VSync presentation interval; detects GPU stalls without penalizing healthy 60Hz/144Hz-capped VSync.
    */
-  public recordFrame(frameMs: number, realDeltaMs = frameMs): void {
+  public recordFrame(frameWorkMs: number, realDeltaMs = frameWorkMs, renderIntervalMs?: number): void {
     const dtMs = Math.max(1, Math.min(250, realDeltaMs));
-    let effectiveMs = Math.max(0.5, frameMs);
+    const intervalMs = Math.max(1, renderIntervalMs ?? dtMs);
+    let effectiveMs = Math.max(0.5, frameWorkMs);
+
+    if (renderIntervalMs !== undefined) {
+      // Detect real GPU/compositor VSync stalls while allowing normal 60Hz (~16.7ms) and 144Hz->60fps cadence (up to ~21.5ms)
+      const stallThresholdMs = this.fpsCapEnabled ? 25.0 : 21.5;
+      if (renderIntervalMs > stallThresholdMs) {
+        effectiveMs = Math.max(effectiveMs, renderIntervalMs);
+      }
+    }
 
     if (this.spikeFrameMs !== null && this.spikeRemainingMs > 0) {
       effectiveMs = this.spikeFrameMs;
@@ -135,9 +147,14 @@ export class PerfManager {
       this.frames.shift();
     }
 
+    this.renderIntervals.push(intervalMs);
+    if (this.renderIntervals.length > WINDOW_SIZE) {
+      this.renderIntervals.shift();
+    }
+
     const dtSec = dtMs / 1000;
-    const avgMs = this.computeAverage(this.frames);
-    this.fps = avgMs > 0 ? Math.min(240, Math.round(1000 / avgMs)) : 60;
+    const avgInterval = this.computeAverage(this.renderIntervals);
+    this.fps = avgInterval > 0 ? Math.min(240, Math.round(1000 / avgInterval)) : 60;
 
     if (this.frames.length < 20) {
       return;
@@ -161,6 +178,7 @@ export class PerfManager {
     this.downgradeAccumSec = 0;
 
     if (this.hasDowngraded && this.upgradeCount < 1 && this.tier !== 'HIGH') {
+      const avgMs = this.computeAverage(this.frames);
       const p95 = this.computeP95(this.frames);
       if (avgMs < 13.5 && p95 < 16.5) {
         this.upgradeAccumSec += dtSec;

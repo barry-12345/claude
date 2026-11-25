@@ -31,6 +31,7 @@ import type { Court2KTestHook } from '../contracts.js';
 import { AudioManager } from '../audio/AudioManager.js';
 import { PerfManager } from '../core/PerfManager.js';
 import { InputController } from '../input/InputController.js';
+import { applyOnlineMatchOver } from '../net/onlineSync.js';
 import { SnapshotBuffer } from '../net/SnapshotBuffer.js';
 import { WsClient } from '../net/WsClient.js';
 import { CourtScene } from '../render/CourtScene.js';
@@ -93,6 +94,7 @@ export class GameApp {
   private rafId: number | null = null;
   private lastRafMs = 0;
   private lastRenderMs = 0;
+  private nextRenderAtMs = 0;
   private startMs = performance.now();
   private lastResumeSecond = -1;
   private disposed = false;
@@ -237,6 +239,7 @@ export class GameApp {
 
     this.lastRafMs = performance.now();
     this.lastRenderMs = this.lastRafMs;
+    this.nextRenderAtMs = this.lastRafMs;
     this.rafId = requestAnimationFrame(this.loop);
   }
 
@@ -537,6 +540,9 @@ export class GameApp {
       case 'MATCH_OVER': {
         this.matchOverReason = ev.reason;
         this.forfeitedBy = ev.forfeitedBy;
+        if (this.mode === 'online') {
+          this.onlineState = applyOnlineMatchOver(this.onlineState, this.snapshots, ev);
+        }
         this.input.setCaptureActive(false);
         break;
       }
@@ -551,9 +557,17 @@ export class GameApp {
     this.lastRafMs = nowMs;
     this.perf.recordRafDelta(rawRafDtMs);
 
-    // Only cap at 60fps when estHz > 105Hz
-    if (this.perf.isFpsCapEnabled() && nowMs - this.lastRenderMs < 15.2) {
-      return;
+    // Only cap at 60fps when estHz > 105Hz using deadline accumulator so 144Hz stays ~60fps (never drops to 48fps)
+    if (this.perf.isFpsCapEnabled()) {
+      if (nowMs < this.nextRenderAtMs) {
+        return;
+      }
+      this.nextRenderAtMs += 1000 / 60;
+      if (nowMs - this.nextRenderAtMs > 34) {
+        this.nextRenderAtMs = nowMs + 1000 / 60;
+      }
+    } else {
+      this.nextRenderAtMs = nowMs;
     }
 
     const renderDtMs = Math.max(1, nowMs - this.lastRenderMs);
@@ -601,8 +615,8 @@ export class GameApp {
       this.scene.renderLobbyPreview(court, this.lobbyState.archetype, (nowMs - this.startMs) / 1000, dtSec);
     }
 
-    const workMs = Math.max(renderDtMs, performance.now() - frameStart);
-    this.perf.recordFrame(workMs, renderDtMs);
+    const frameWorkMs = Math.max(0.5, performance.now() - frameStart);
+    this.perf.recordFrame(frameWorkMs, renderDtMs, renderDtMs);
 
     const preset = this.perf.getPreset();
     this.scene.applyPerfPreset(preset, this.perf.getActiveDpr());
@@ -640,8 +654,8 @@ export class GameApp {
     const playable = raw.phase === 'serve_ready' || raw.phase === 'serve_toss' || raw.phase === 'rally';
     if (!playable) return;
 
-    this.onlineInputAccumSec += dtSec;
     const fixedDt = COURT_DIM.FIXED_DT;
+    this.onlineInputAccumSec = Math.min(this.onlineInputAccumSec + dtSec, fixedDt * 2);
     let steps = 0;
     while (this.onlineInputAccumSec >= fixedDt && steps < 2) {
       this.onlineInputAccumSec -= fixedDt;

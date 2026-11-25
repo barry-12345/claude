@@ -11,6 +11,7 @@ import {
   type MatchState,
   type PlayerIndex,
 } from '@court2k/shared';
+import type { PlayerAvatarController } from '../contracts.js';
 import type { QualityPreset } from '../core/PerfManager.js';
 import { ProceduralPlayerAvatar } from './PlayerAvatar.js';
 
@@ -121,7 +122,7 @@ export class CourtScene {
   private readonly ledStripMat: THREE.MeshBasicMaterial;
   private readonly surfaceTextures: Record<CourtId, THREE.CanvasTexture>;
 
-  private readonly avatars: [ProceduralPlayerAvatar, ProceduralPlayerAvatar];
+  private readonly avatars: [PlayerAvatarController, PlayerAvatarController];
   private readonly ballMesh: THREE.Mesh;
   private readonly ballShadow: THREE.Mesh;
   private readonly landingRing: THREE.Mesh;
@@ -151,6 +152,9 @@ export class CourtScene {
   private currentCourt: CourtId = 'hard';
   private currentArchetypes: [ArchetypeId, ArchetypeId] = ['allcourt', 'defender'];
   private particleScale = 1.0;
+  private lastAppliedDpr = -1;
+  private lastMeterHalfWidth = -1;
+  private lastMeterSweetCenter = -1;
 
   private readonly camTarget = new THREE.Vector3(0, 0.3, 1.8);
   private readonly camPos = new THREE.Vector3(0, 10.4, 24.0);
@@ -353,17 +357,27 @@ export class CourtScene {
     this.meterGroup.add(this.meterGreenMesh);
 
     this.meterNeedleGroup = new THREE.Group();
-    const needle = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.06, 0.28),
+    const needleOutline = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.11, 0.3),
       new THREE.MeshBasicMaterial({
-        color: '#ffffff',
+        color: '#09101a',
+        side: THREE.DoubleSide,
+        depthTest: false,
+      })
+    );
+    needleOutline.position.y = 0.76;
+    needleOutline.renderOrder = 12;
+    const needle = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.075, 0.27),
+      new THREE.MeshBasicMaterial({
+        color: '#facc15',
         side: THREE.DoubleSide,
         depthTest: false,
       })
     );
     needle.position.y = 0.76;
-    needle.renderOrder = 12;
-    this.meterNeedleGroup.add(needle);
+    needle.renderOrder = 13;
+    this.meterNeedleGroup.add(needleOutline, needle);
     this.meterGroup.add(this.meterNeedleGroup);
 
     this.meterShockwave = new THREE.Mesh(
@@ -436,7 +450,10 @@ export class CourtScene {
   }
 
   public applyPerfPreset(preset: QualityPreset, activeDpr: number): void {
-    this.renderer.setPixelRatio(activeDpr);
+    if (Math.abs(activeDpr - this.lastAppliedDpr) > 0.001) {
+      this.renderer.setPixelRatio(activeDpr);
+      this.lastAppliedDpr = activeDpr;
+    }
     this.particleScale = preset.particleScale;
 
     const wantShadow = preset.shadowMapSize > 0;
@@ -586,20 +603,27 @@ export class CourtScene {
       const arcSpan = Math.PI * 0.7;
       const maxP = PHYSICS_CONSTANTS.METER_MAX_PROGRESS;
       const pNorm = Math.min(1, Math.max(0, localPlayer.meter.progress / maxP));
-      const sweetNorm = localPlayer.meter.sweetCenter / maxP;
-      const halfWidthNorm = localPlayer.meter.effectiveHalfWidth / maxP;
 
-      const greenStartAngle = arcStart + (1 - (sweetNorm + halfWidthNorm)) * arcSpan;
-      const greenSpan = Math.max(0.04, halfWidthNorm * 2 * arcSpan);
-      this.meterGreenMesh.geometry.dispose();
-      this.meterGreenMesh.geometry = new THREE.RingGeometry(
-        0.69,
-        0.83,
-        24,
-        1,
-        greenStartAngle,
-        greenSpan
-      );
+      if (
+        Math.abs(localPlayer.meter.effectiveHalfWidth - this.lastMeterHalfWidth) > 1e-4 ||
+        Math.abs(localPlayer.meter.sweetCenter - this.lastMeterSweetCenter) > 1e-4
+      ) {
+        this.lastMeterHalfWidth = localPlayer.meter.effectiveHalfWidth;
+        this.lastMeterSweetCenter = localPlayer.meter.sweetCenter;
+        const sweetNorm = localPlayer.meter.sweetCenter / maxP;
+        const halfWidthNorm = localPlayer.meter.effectiveHalfWidth / maxP;
+        const greenStartAngle = arcStart + (1 - (sweetNorm + halfWidthNorm)) * arcSpan;
+        const greenSpan = Math.max(0.04, halfWidthNorm * 2 * arcSpan);
+        this.meterGreenMesh.geometry.dispose();
+        this.meterGreenMesh.geometry = new THREE.RingGeometry(
+          0.69,
+          0.83,
+          24,
+          1,
+          greenStartAngle,
+          greenSpan
+        );
+      }
 
       // Needle sweeps right-to-left or left-to-right across top arc
       const needleAngle = Math.PI * 0.35 - pNorm * arcSpan;

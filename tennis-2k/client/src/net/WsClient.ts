@@ -195,6 +195,9 @@ export class WsClient {
     };
 
     socket.onclose = () => {
+      if (this.ws !== socket) {
+        return;
+      }
       this.stopPingLoop();
       const wasConnected = this.connected;
       this.connected = false;
@@ -221,12 +224,17 @@ export class WsClient {
       this.clearSession();
     }
     if (this.ws) {
+      const oldWs = this.ws;
+      this.ws = null;
+      oldWs.onopen = null;
+      oldWs.onmessage = null;
+      oldWs.onclose = null;
+      oldWs.onerror = null;
       try {
-        this.ws.close();
+        oldWs.close();
       } catch {
         // ignore
       }
-      this.ws = null;
     }
     if (this.connected) {
       this.connected = false;
@@ -242,12 +250,17 @@ export class WsClient {
     this.stopPingLoop();
     this.intentionalClose = reconnectAfterMs < 0;
     if (this.ws) {
+      const oldWs = this.ws;
+      this.ws = null;
+      oldWs.onopen = null;
+      oldWs.onmessage = null;
+      oldWs.onclose = null;
+      oldWs.onerror = null;
       try {
-        this.ws.close();
+        oldWs.close();
       } catch {
         // ignore
       }
-      this.ws = null;
     }
     this.connected = false;
     this.handlers.onConnectionChange?.(false);

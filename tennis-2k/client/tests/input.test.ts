@@ -112,4 +112,21 @@ describe('InputController & resetAndRebind self-healing', () => {
     expect(f2.phase).toBe('release');
     expect(f2.action).toBe('J');
   });
+
+  it('does not blur lobby input elements on window_focus when captureActive is false', () => {
+    const bus = new MockEventBus();
+    const blurSpy = vi.fn();
+    bus.activeElement = { blur: blurSpy };
+
+    const ic = new InputController(bus, bus);
+    ic.attach();
+    ic.setCaptureActive(false);
+
+    bus.emit('focus');
+    expect(blurSpy).not.toHaveBeenCalled();
+
+    ic.setCaptureActive(true);
+    bus.emit('focus');
+    expect(blurSpy).toHaveBeenCalledTimes(1);
+  });
 });

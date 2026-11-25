@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createMatchState, type ServerMessage } from '@court2k/shared';
+import { createMatchState, type GameEvent, type ServerMessage } from '@court2k/shared';
+import { applyOnlineMatchOver } from '../src/net/onlineSync.js';
 import { SnapshotBuffer } from '../src/net/SnapshotBuffer.js';
 import { deriveWsUrl, WsClient, type WebSocketLike } from '../src/net/WsClient.js';
 
@@ -26,7 +27,10 @@ class MockWebSocket implements WebSocketLike {
 
   close(): void {
     this.readyState = 3;
-    this.onclose?.({});
+    const cb = this.onclose;
+    setTimeout(() => {
+      cb?.({});
+    }, 5);
   }
 }
 
@@ -52,7 +56,7 @@ class MemoryStorage implements Storage {
   }
 }
 
-describe('WS URL derivation, SnapshotBuffer reset, and WsClient session reconnect', () => {
+describe('WS URL derivation, SnapshotBuffer reset, online MATCH_OVER sync, and WsClient reconnect', () => {
   it('derives relative WS URL cleanly under root and /tennis/ subpaths', () => {
     expect(deriveWsUrl('/', { protocol: 'http:', host: '127.0.0.1:3201' })).toBe(
       'ws://127.0.0.1:3201/ws'
@@ -84,6 +88,52 @@ describe('WS URL derivation, SnapshotBuffer reset, and WsClient session reconnec
     buf.reset(fullSyncState, 2000);
     expect(buf.size()).toBe(1);
     expect(buf.sample(2050)?.tick).toBe(55);
+  });
+
+  it('transitions onlineState & SnapshotBuffer to match_over when receiving only GAME_EVENT(MATCH_OVER)', () => {
+    const buf = new SnapshotBuffer(40);
+    const pausedState = createMatchState({
+      mode: 'online',
+      court: 'clay',
+      format: 'fast4',
+      archetypes: ['power', 'defender'],
+      seed: 7,
+    });
+    pausedState.phase = 'paused_disconnect';
+    buf.push(120, 5000, pausedState, 5000);
+
+    const ev: Extract<GameEvent, { type: 'MATCH_OVER' }> = {
+      type: 'MATCH_OVER',
+      winner: 0,
+      reason: 'forfeit',
+      forfeitedBy: 1,
+      score: {
+        ...pausedState.score,
+        games: [2, 1],
+        points: [2, 1],
+        winner: 0,
+      },
+      stats: [
+        {
+          aces: 1,
+          doubleFaults: 0,
+          firstServesIn: 4,
+          firstServesTotal: 5,
+          winners: 3,
+          unforcedErrors: 1,
+          perfectShots: 5,
+          totalMeterShots: 8,
+        },
+        pausedState.stats[1],
+      ],
+    };
+
+    const updated = applyOnlineMatchOver(pausedState, buf, ev);
+    expect(updated?.phase).toBe('match_over');
+    expect(updated?.score.winner).toBe(0);
+    expect(updated?.score.games).toEqual([2, 1]);
+    expect(updated?.stats[0].winners).toBe(3);
+    expect(buf.sample(5100)?.phase).toBe('match_over');
   });
 
   it('stores sessionToken, resets seq on MATCH_START/FULL_SYNC, reconnects, and clears token on INVALID_TOKEN', () => {
@@ -169,6 +219,67 @@ describe('WS URL derivation, SnapshotBuffer reset, and WsClient session reconnec
     });
     expect(client.hasStoredSession()).toBe(false);
     expect(received.some((m) => m.type === 'FULL_SYNC')).toBe(true);
+
+    client.disconnect(true);
+    vi.useRealTimers();
+  });
+
+  it('respects simulateDisconnect(4000) delay without async onclose overwriting it to 1200ms', () => {
+    vi.useFakeTimers();
+    const sockets: MockWebSocket[] = [];
+    const storage = new MemoryStorage();
+
+    const client = new WsClient(
+      { onMessage: () => {} },
+      {
+        wsUrl: 'ws://127.0.0.1:3301/ws',
+        storage,
+        factory: () => {
+          const s = new MockWebSocket();
+          sockets.push(s);
+          return s;
+        },
+      }
+    );
+
+    client.createRoom('hard', 'fast4', 'allcourt');
+    sockets[0].openNow();
+    sockets[0].receive({
+      type: 'ROOM_CREATED',
+      payload: {
+        roomCode: 'WXYZ',
+        sessionToken: 'tok_456',
+        yourSide: 1,
+        playerIndex: 0,
+        matchConfig: {
+          mode: 'online',
+          court: 'hard',
+          format: 'fast4',
+          archetypes: ['allcourt', 'defender'],
+          seed: 1,
+        },
+      },
+    });
+
+    client.simulateDisconnect(4000);
+
+    // Async onclose fires at 5ms and must NOT reschedule at 1200ms
+    vi.advanceTimersByTime(1500);
+    expect(sockets).toHaveLength(1);
+
+    // Still waiting before 4000ms
+    vi.advanceTimersByTime(2400);
+    expect(sockets).toHaveLength(1);
+
+    // Reconnects at 4000ms
+    vi.advanceTimersByTime(200);
+    expect(sockets).toHaveLength(2);
+
+    // simulateDisconnect(-1) stays disconnected permanently
+    sockets[1].openNow();
+    client.simulateDisconnect(-1);
+    vi.advanceTimersByTime(20000);
+    expect(sockets).toHaveLength(2);
 
     client.disconnect(true);
     vi.useRealTimers();

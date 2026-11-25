@@ -64,4 +64,50 @@ describe('PerfManager DPR, Adaptive Tiers, and Refresh Cap', () => {
       expect(pm.isFpsCapEnabled()).toBe(true);
     }
   });
+
+  it('recovers once on healthy 60Hz VSync (~16.67ms interval) after downgrade', () => {
+    const pm = new PerfManager();
+    pm.setDevicePixelRatio(2);
+    for (let i = 0; i < 30; i++) pm.recordRafDelta(16.6667);
+
+    // Simulate 2.8s GPU stall (20-frame warmup + 2.0s sustained >20ms) -> HIGH -> MEDIUM
+    for (let t = 0; t < 2800; t += 33) {
+      pm.recordFrame(4, 33, 33);
+    }
+    expect(pm.getQualityTier()).toBe('MEDIUM');
+
+    // Recover for 9s at steady 60Hz VSync (16.67ms presentation interval, 3ms JS/GPU work)
+    for (let t = 0; t < 9000; t += 16.6667) {
+      pm.recordFrame(3, 16.6667, 16.6667);
+    }
+    expect(pm.getQualityTier()).toBe('HIGH');
+    expect(pm.getUpgradeCount()).toBe(1);
+  });
+
+  it('keeps 144Hz capped at ~60fps without false-downgrading on alternating 13.89ms/20.83ms cadence', () => {
+    const pm = new PerfManager();
+    pm.setDevicePixelRatio(2);
+    const rafStep = 1000 / 144;
+    for (let i = 0; i < 30; i++) pm.recordRafDelta(rafStep);
+    expect(pm.isFpsCapEnabled()).toBe(true);
+
+    let nextRenderAtMs = 0;
+    let lastRenderMs = 0;
+    let rendered = 0;
+    for (let now = 0; now <= 10000; now += rafStep) {
+      if (now < nextRenderAtMs) continue;
+      nextRenderAtMs += 1000 / 60;
+      if (now - nextRenderAtMs > 34) nextRenderAtMs = now + 1000 / 60;
+      const renderDtMs = Math.max(1, now - lastRenderMs);
+      lastRenderMs = now;
+      rendered += 1;
+      pm.recordFrame(3.2, renderDtMs, renderDtMs);
+    }
+
+    expect(pm.getQualityTier()).toBe('HIGH');
+    expect(pm.getMetrics().fps).toBeGreaterThanOrEqual(58);
+    expect(pm.getMetrics().fps).toBeLessThanOrEqual(62);
+    expect(rendered).toBeGreaterThanOrEqual(590);
+    expect(rendered).toBeLessThanOrEqual(610);
+  });
 });

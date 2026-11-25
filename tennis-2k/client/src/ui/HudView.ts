@@ -40,6 +40,17 @@ function formatPoints(pts: number, isTiebreak: boolean): string {
   return TENNIS_POINT_NAMES[Math.min(3, pts)] ?? String(pts);
 }
 
+export function formatPostMatchScoreSummary(score: MatchState['score'], localIdx: PlayerIndex): string {
+  const oppIdx = (1 - localIdx) as PlayerIndex;
+  if (score.format === 'super_tiebreak') {
+    return `${score.points[localIdx]} - ${score.points[oppIdx]}`;
+  }
+  if (score.isTiebreak) {
+    return `${score.games[localIdx]} - ${score.games[oppIdx]} (${score.points[localIdx]}-${score.points[oppIdx]})`;
+  }
+  return `${score.games[localIdx]} - ${score.games[oppIdx]}`;
+}
+
 export class HudView {
   private readonly hudRoot: HTMLElement;
   private readonly modalRoot: HTMLElement;
@@ -416,7 +427,7 @@ export class HudView {
     }
 
     if (state.phase === 'match_over') {
-      const key = `mo:${state.score.winner}:${rematchRequested.join(',')}:${matchOverReason}`;
+      const key = `mo:${state.score.winner}:${state.score.games.join(',')}:${state.score.points.join(',')}:${rematchRequested.join(',')}:${matchOverReason}`;
       this.modalRoot.classList.remove('hidden');
       if (key === this.lastModalKey) return;
       this.lastModalKey = key;
@@ -426,12 +437,13 @@ export class HudView {
       const sOpp = state.stats[oppIdx];
       const mySum = computeStatsSummary(sMy);
       const oppSum = computeStatsSummary(sOpp);
+      const scoreSummary = formatPostMatchScoreSummary(state.score, localIdx);
       const forfeitNotice =
         matchOverReason === 'forfeit'
           ? forfeitedBy === localIdx
             ? '因断线超过 15 秒判负'
             : '对手断线超过 15 秒弃权，你获得胜利！'
-          : `${state.score.games[localIdx]} - ${state.score.games[oppIdx]}`;
+          : scoreSummary;
 
       const myRematch = rematchRequested[localIdx];
       const oppRematch = rematchRequested[oppIdx];

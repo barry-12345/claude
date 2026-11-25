@@ -177,9 +177,11 @@ export class InputController implements ClientInputController {
     this.lastResetReason = reason;
     this.detach();
     this.attach();
-    const activeEl = this.doc?.activeElement;
-    if (activeEl && typeof activeEl.blur === 'function') {
-      activeEl.blur();
+    if (this.captureActive || reason !== 'window_focus') {
+      const activeEl = this.doc?.activeElement;
+      if (activeEl && typeof activeEl.blur === 'function') {
+        activeEl.blur();
+      }
     }
   }
 
