@@ -1,0 +1,21 @@
+{
+  "name": "court2k",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.51.1",
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  }
+}
