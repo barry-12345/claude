@@ -1,0 +1,64 @@
+{
+  "checks": {
+    "normalIsolation": {
+      "testHookUndefined": true,
+      "netDebugHidden": true
+    },
+    "singlePauseResume": {
+      "pauseVisible": true,
+      "pauseHiddenAfterResume": true
+    },
+    "muteToggled": true,
+    "initialTestState": {
+      "activeDpr": 2,
+      "drawCalls": 99,
+      "qualityTier": "HIGH",
+      "estHz": 60,
+      "fpsCapEnabled": false
+    },
+    "hawkeyeInAndPostMatch": {
+      "hkInState": {
+        "active": true,
+        "elapsedSec": 0.5666666666666668,
+        "durationSec": 1.8,
+        "bouncePos": {
+          "x": 4.042322686177038,
+          "y": 0.0335,
+          "z": -7.536260894411761
+        },
+        "isIn": true,
+        "distanceToLineCm": 7.27,
+        "lineType": "sideline"
+      },
+      "lastResetReason": "HAWKEYE_END"
+    },
+    "hawkeyeOutAndImmediateInput": {
+      "hkOutState": {
+        "active": true,
+        "elapsedSec": 0.6000000000000002,
+        "durationSec": 1.8,
+        "bouncePos": {
+          "x": 1.1989922144447178,
+          "y": 0.0335,
+          "z": -11.956674927236838
+        },
+        "isIn": false,
+        "distanceToLineCm": 7.17,
+        "lineType": "baseline"
+      },
+      "pressedMoved": true,
+      "lastResetReason": "HAWKEYE_END"
+    },
+    "perfAdapt": {
+      "hz90Cap": false,
+      "hz120Cap": true,
+      "hz144Cap": true,
+      "tierAfterSpike": "LOW",
+      "dprAfterSpike": 1
+    },
+    "superTiebreakPostMatchText": true
+  },
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": []
+}

@@ -1,0 +1,467 @@
+{
+  "startedAt": "2026-11-25T17:35:47.465Z",
+  "webglRenderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "results": {
+    "T01": {
+      "status": "pass",
+      "checks": {
+        "noTestHook": true,
+        "netdebugHidden": {
+          "exists": true,
+          "className": "netdebug-panel hidden",
+          "display": "none",
+          "hidden": true
+        },
+        "scrollYAllZero": true,
+        "pauseModalVisible": true,
+        "frameChangedAfterResumeKeyD": true,
+        "gameDone": true,
+        "finalScore": {
+          "games": [
+            0,
+            1
+          ],
+          "points": [
+            "0",
+            "0"
+          ],
+          "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+          "callout": "ACE! 发球直接得分"
+        },
+        "scoreHistory": [
+          {
+            "sig": "0-0|0-0",
+            "head": "硬地 · 美网蓝绿\n            FAST4 · 二发",
+            "tMs": 3
+          },
+          {
+            "sig": "0-0|0-15",
+            "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+            "tMs": 2609
+          },
+          {
+            "sig": "0-0|0-30",
+            "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+            "tMs": 6092
+          },
+          {
+            "sig": "0-0|0-40",
+            "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+            "tMs": 10444
+          },
+          {
+            "sig": "0-1|0-0",
+            "head": "硬地 · 美网蓝绿\n            FAST4 · 一发",
+            "tMs": 14808
+          }
+        ],
+        "calloutsSample": [
+          "PERFECT · 222 km/h",
+          "ACE! 发球直接得分",
+          "VERY_EARLY · 134 km/h",
+          "VERY_EARLY · 108 km/h",
+          "ACE! 发球直接得分",
+          "PERFECT · 222 km/h",
+          "ACE! 发球直接得分",
+          "VERY_EARLY · 135 km/h",
+          "PERFECT · 162 km/h",
+          "ACE! 发球直接得分"
+        ],
+        "cycles": 17,
+        "inputSample": [
+          "WASD/Arrows",
+          "J(530ms serve)",
+          "Esc(pause/resume)",
+          "KeyD",
+          "KeyA+KeyJ(535ms)",
+          "KeyD+KeyK(535ms)",
+          "W+K(530ms)",
+          "KeyD+KeyJ(535ms)",
+          "KeyA+KeyK(535ms)",
+          "KeyD+KeyL(535ms)",
+          "W+K(530ms)",
+          "KeyD+KeyK(535ms)",
+          "KeyA+KeyL(535ms)",
+          "KeyD+KeyJ(535ms)",
+          "W+K(530ms)",
+          "KeyD+KeyL(535ms)"
+        ],
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failed404": []
+      }
+    },
+    "T02": {
+      "status": "pass",
+      "checks": {
+        "archStats": [
+          {
+            "id": "power",
+            "text": "底线重炮 白头带 · 宽肩重炮型 POW 94 SPD 72 SPN 82 TIM 76 NET 76"
+          },
+          {
+            "id": "allcourt",
+            "text": "全能节奏 双护腕 · 均衡标准型 POW 80 SPD 80 SPN 82 TIM 86 NET 72"
+          },
+          {
+            "id": "serve_volley",
+            "text": "发球上网 运动遮阳帽 · 复古全白 POW 84 SPD 84 SPN 74 TIM 74 NET 84"
+          },
+          {
+            "id": "defender",
+            "text": "防守磨王 反戴鸭舌帽 · 敏捷修长 POW 70 SPD 94 SPN 86 TIM 82 NET 68"
+          }
+        ],
+        "muteTexts": {
+          "muteBefore": "🔊 音效",
+          "muteAfterClick1": "🔇 静音",
+          "muteAfterClick2": "🔊 音效"
+        },
+        "audioErrors": [],
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failed404": []
+      }
+    },
+    "T03": {
+      "status": "pass",
+      "checks": {
+        "normalHalfWidth": 0.055923999999999995,
+        "takeoverHalfWidth": 0.069905,
+        "ratio": 1.25,
+        "snapshots": [
+          {
+            "label": "point_0_active",
+            "points": [
+              1,
+              0
+            ],
+            "games": [
+              0,
+              0
+            ],
+            "takeoverEnergy": 100,
+            "takeoverPointsLeft": 2,
+            "takeoverCooldown": false,
+            "hudText": "🔥 你的 TAKEOVER 激活中 (2分)"
+          },
+          {
+            "label": "after_point_1",
+            "points": [
+              2,
+              0
+            ],
+            "games": [
+              0,
+              0
+            ],
+            "takeoverEnergy": 100,
+            "takeoverPointsLeft": 1,
+            "takeoverCooldown": false,
+            "hudText": "🔥 你的 TAKEOVER 激活中 (1分)"
+          },
+          {
+            "label": "after_point_2",
+            "points": [
+              2,
+              1
+            ],
+            "games": [
+              0,
+              0
+            ],
+            "takeoverEnergy": 0,
+            "takeoverPointsLeft": 0,
+            "takeoverCooldown": true,
+            "hudText": "🔥 你的 TAKEOVER 冷却中"
+          }
+        ],
+        "consoleErrors": [],
+        "pageErrors": []
+      }
+    },
+    "T04": {
+      "status": "pass",
+      "checks": {
+        "in8cm": {
+          "triggered": true,
+          "durationMs": 1827,
+          "banner": "HAWKEYE 3D 鹰眼挑战 IN · 界内 单打边线 · 距线 7.3 cm",
+          "hawkeye": {
+            "active": true,
+            "elapsedSec": 0,
+            "durationSec": 1.8,
+            "bouncePos": {
+              "x": 4.042322686177038,
+              "y": 0.0335,
+              "z": -7.536260894411761
+            },
+            "isIn": true,
+            "distanceToLineCm": 7.27,
+            "lineType": "sideline"
+          }
+        },
+        "out10cm": {
+          "triggered": true,
+          "durationMs": 1817,
+          "banner": "HAWKEYE 3D 鹰眼挑战 OUT · 出界 底线 · 距线 7.2 cm",
+          "hawkeye": {
+            "active": true,
+            "elapsedSec": 0.016666666666666666,
+            "durationSec": 1.8,
+            "bouncePos": {
+              "x": 1.1989922144447178,
+              "y": 0.0335,
+              "z": -11.956674927236838
+            },
+            "isIn": false,
+            "distanceToLineCm": 7.17,
+            "lineType": "baseline"
+          },
+          "lastResetReasonAtEnd": "HAWKEYE_END",
+          "posXBefore": 1.45,
+          "posXAfterKeyD": 2.682386396535171,
+          "deltaX": 1.2323863965351711
+        },
+        "counter25cm": {
+          "triggered": false,
+          "phasesObserved": [
+            "rally",
+            "point_over"
+          ]
+        },
+        "consoleErrors": [],
+        "pageErrors": []
+      }
+    },
+    "T05": {
+      "status": "pass",
+      "checks": {
+        "decidingBanner": "DECIDING POINT · 金球决胜",
+        "matchPointBanner": "MATCH POINT · 赛点",
+        "resetsTo10_9": 0,
+        "postMatchCheck": {
+          "phase": "match_over",
+          "score": {
+            "format": "super_tiebreak",
+            "games": [
+              1,
+              0
+            ],
+            "points": [
+              11,
+              9
+            ],
+            "isTiebreak": true,
+            "isDecidingPoint": false,
+            "server": 0,
+            "serveNumber": 1,
+            "courtSide": "deuce",
+            "keyPointLabel": "NONE",
+            "winner": 0
+          },
+          "stats": [
+            {
+              "aces": 1,
+              "doubleFaults": 0,
+              "firstServesIn": 1,
+              "firstServesTotal": 1,
+              "winners": 1,
+              "unforcedErrors": 0,
+              "perfectShots": 1,
+              "totalMeterShots": 1
+            },
+            {
+              "aces": 0,
+              "doubleFaults": 0,
+              "firstServesIn": 0,
+              "firstServesTotal": 0,
+              "winners": 0,
+              "unforcedErrors": 0,
+              "perfectShots": 0,
+              "totalMeterShots": 0
+            }
+          ],
+          "modalText": "🏆 胜利！MATCH WINNER 11 - 9 你2K 赛后统计AI 1Ace 发球直接得分0 0双误 (Double Faults)0 100%一发成功率0% 1制胜分 (Winners)0 0非受迫失误 (UE)0 100%Perfect 绿条率0% 再来一局 返回大厅",
+          "rows": [
+            [
+              "1",
+              "Ace 发球直接得分",
+              "0"
+            ],
+            [
+              "0",
+              "双误 (Double Faults)",
+              "0"
+            ],
+            [
+              "100%",
+              "一发成功率",
+              "0%"
+            ],
+            [
+              "1",
+              "制胜分 (Winners)",
+              "0"
+            ],
+            [
+              "0",
+              "非受迫失误 (UE)",
+              "0"
+            ],
+            [
+              "100%",
+              "Perfect 绿条率",
+              "0%"
+            ]
+          ],
+          "modalFitsViewport": true
+        },
+        "consoleErrors": [],
+        "pageErrors": []
+      }
+    },
+    "T06": {
+      "status": "pass",
+      "checks": {
+        "initial": {
+          "state": {
+            "activeDpr": 1,
+            "drawCalls": 97,
+            "qualityTier": "HIGH",
+            "upgradeCount": 0,
+            "fps": 59,
+            "estHz": 60,
+            "fpsCapEnabled": false,
+            "maxFrameMs": 33.3
+          },
+          "netdebugText": "NET / PERF DEBUG Mode: single FPS: 59 | Max: 33.3ms Avg: 1.8ms | P95: 1.8ms Tier: HIGH (Up: 0/1) ActiveDPR: 1.00 DrawCalls: 97 EstHz: 60Hz (Uncapped) RTT: 0ms | Reconn: 0"
+        },
+        "hzTests": {
+          "90": {
+            "estHz": 90,
+            "fpsCapEnabled": false
+          },
+          "100": {
+            "estHz": 100,
+            "fpsCapEnabled": false
+          },
+          "120": {
+            "estHz": 120,
+            "fpsCapEnabled": true
+          },
+          "144": {
+            "estHz": 144,
+            "fpsCapEnabled": true
+          }
+        },
+        "lifecycle": {
+          "before": {
+            "qualityTier": "HIGH",
+            "upgradeCount": 0,
+            "activeDpr": 1,
+            "drawCalls": 97,
+            "fps": 60,
+            "maxFrameMs": 1.7
+          },
+          "afterSpike1": {
+            "qualityTier": "MEDIUM",
+            "upgradeCount": 0,
+            "activeDpr": 1,
+            "drawCalls": 97,
+            "fps": 60,
+            "maxFrameMs": 26
+          },
+          "afterRecovery1": {
+            "qualityTier": "HIGH",
+            "upgradeCount": 1,
+            "activeDpr": 1,
+            "drawCalls": 97,
+            "fps": 60,
+            "maxFrameMs": 10
+          },
+          "afterSpike2": {
+            "qualityTier": "MEDIUM",
+            "upgradeCount": 1,
+            "activeDpr": 1,
+            "drawCalls": 97,
+            "fps": 60,
+            "maxFrameMs": 26
+          },
+          "afterRecovery2": {
+            "qualityTier": "MEDIUM",
+            "upgradeCount": 1,
+            "activeDpr": 1,
+            "drawCalls": 97,
+            "fps": 60,
+            "maxFrameMs": 10
+          }
+        },
+        "consoleErrors": [],
+        "pageErrors": []
+      }
+    },
+    "T07": {
+      "status": "pass",
+      "checks": {
+        "valAfterAB": "AB",
+        "activeIdAfterWindowFocus": "input-room-code",
+        "valAfterCD": "ABCD",
+        "layoutCheck": {
+          "viewport": {
+            "w": 1280,
+            "h": 720
+          },
+          "panelRect": {
+            "x": 28,
+            "y": 109.234375,
+            "w": 600,
+            "h": 544.53125,
+            "right": 628,
+            "bottom": 653.765625
+          },
+          "rects": [
+            {
+              "sel": "#btn-create-room",
+              "rect": {
+                "x": 49,
+                "y": 536.765625,
+                "w": 558,
+                "h": 46,
+                "right": 607,
+                "bottom": 582.765625
+              }
+            },
+            {
+              "sel": "#input-room-code",
+              "rect": {
+                "x": 49,
+                "y": 592.765625,
+                "w": 464,
+                "h": 42,
+                "right": 513,
+                "bottom": 634.765625
+              }
+            },
+            {
+              "sel": "#btn-join-room",
+              "rect": {
+                "x": 521,
+                "y": 592.765625,
+                "w": 86,
+                "h": 42,
+                "right": 607,
+                "bottom": 634.765625
+              }
+            }
+          ],
+          "hasHorizontalOverflow": false
+        },
+        "consoleErrors": [],
+        "pageErrors": [],
+        "failed404": []
+      }
+    }
+  },
+  "finishedAt": "2026-11-25T17:42:44.793Z"
+}
