@@ -138,6 +138,72 @@ describe('Mirroring, W+K Symmetry & Online Pause/Disconnect/Forfeit FSM', () => 
     expect(Math.abs(p1Drop.bounceZ)).toBeLessThanOrEqual(3.6);
   });
 
+  it('aims deeper on W (aimZ=-1) and shallower on S (aimZ=+1) when serving for both P0 and P1', () => {
+    const runServeDepth = (playerIndex: 0 | 1, localAimZ: -1 | 1) => {
+      const side = playerIndex === 0 ? 1 : -1;
+      let state = createMatchState({
+        mode: 'online',
+        court: 'hard',
+        format: 'fast4',
+        archetypes: ['allcourt', 'allcourt'],
+        seed: 66,
+      });
+      state.score.server = playerIndex;
+      if (playerIndex === 1) {
+        state.players[0].pos = { x: -2.15, y: 0, z: 12.335 };
+        state.players[1].pos = { x: -1.45, y: 0, z: -12.435 };
+      }
+      const rng = createRng(66);
+      const holdIn = toWorldInput(
+        { seq: 1, moveX: 0, moveZ: 0, aimX: 0, aimZ: localAimZ, action: 'J', phase: 'hold' },
+        side
+      );
+      const relIn = toWorldInput(
+        { seq: 2, moveX: 0, moveZ: 0, aimX: 0, aimZ: localAimZ, action: 'J', phase: 'release' },
+        side
+      );
+      state = stepMatch(
+        state,
+        playerIndex === 0 ? [holdIn, IDLE_INPUT] : [IDLE_INPUT, holdIn],
+        COURT_DIM.FIXED_DT,
+        rng
+      ).state;
+      state.players[playerIndex].meter.progress = 0.78;
+      state = stepMatch(
+        state,
+        playerIndex === 0 ? [relIn, IDLE_INPUT] : [IDLE_INPUT, relIn],
+        COURT_DIM.FIXED_DT,
+        rng
+      ).state;
+
+      let bounceZ = 0;
+      let inBounds = false;
+      for (let t = 0; t < 150; t++) {
+        const res = stepMatch(state, [IDLE_INPUT, IDLE_INPUT], COURT_DIM.FIXED_DT, rng);
+        state = res.state;
+        const b = res.events.find((e) => e.type === 'BOUNCE');
+        if (b && b.type === 'BOUNCE' && b.bounceIndex === 1) {
+          bounceZ = b.pos.z;
+          inBounds = b.inBounds;
+          break;
+        }
+      }
+      return { absZ: Math.abs(bounceZ), inBounds };
+    };
+
+    const p0Deep = runServeDepth(0, -1); // W = deep
+    const p0Short = runServeDepth(0, 1); // S = shallow
+    expect(p0Deep.inBounds).toBe(true);
+    expect(p0Short.inBounds).toBe(true);
+    expect(p0Deep.absZ).toBeGreaterThan(p0Short.absZ + 0.5);
+
+    const p1Deep = runServeDepth(1, -1); // W = deep
+    const p1Short = runServeDepth(1, 1); // S = shallow
+    expect(p1Deep.inBounds).toBe(true);
+    expect(p1Short.inBounds).toBe(true);
+    expect(p1Deep.absZ).toBeGreaterThan(p1Short.absZ + 0.5);
+  });
+
   it('enforces manual pause limit (3/player), 60s timeout auto-resume, and single-player exemption', () => {
     const rng = createRng(11);
     let state = createMatchState({

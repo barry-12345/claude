@@ -1,0 +1,31 @@
+﻿=== Workspace Resolution (npm ls) ===
+court2k@1.0.0 D:\court2k-work\claude\tennis-2k
++-- @court2k/client@1.0.0 -> .\client
+| +-- @court2k/shared@1.0.0 deduped -> .\shared
+| +-- @types/three@0.174.0
+| +-- three@0.174.0
+| +-- typescript@5.9.3 deduped
+| `-- vite@6.4.6
++-- @court2k/server@1.0.0 -> .\server
+| +-- @court2k/shared@1.0.0 deduped -> .\shared
+| +-- @types/ws@8.18.2
+| +-- tsx@4.23.15
+| +-- typescript@5.9.3 deduped
+| `-- ws@8.23.0
++-- @court2k/shared@1.0.0 -> .\shared
++-- playwright-core@1.65.1
++-- typescript@5.9.3
+`-- vitest@3.2.7
+
+
+=== Node ESM Import Check (@court2k/shared) ===
+exports_count=46
+exports=ARCHETYPES,COURTS,COURT_DIM,PHYSICS_CONSTANTS,ROOM_CODE_ALPHABET,SHOT_METER_MULT,applyDisconnect,applyReconnect,applyScorePatch,awardPointToScore,clamp,cloneMatchState,cloneVec3,computeAIInput,computeBallAcceleration,computeBaseGreenHalfWidth,computeCourtSide,computeKeyPointLabel,computeNetAccuracyMultiplier,computePlayerMaxSpeed,computePowerMultiplier,computeServeSetupPositions,computeShotQuality,computeSpinMultiplier,computeStatsSummary,createEmptyStats,createInitialScoreState,createMatchState,createRng,evaluateBounceBounds,fastForwardPauseState,generateRoomCode,getAIProfileReactionSec,launchHawkeyeTestBall,makeTopspinVec,netHeightAt,refreshScoreMetadata,requestManualPause,requestManualResume,solveBallisticShot,stepBallSubstep,stepMatch,toLocalEvent,toLocalVec3,toLocalView,toWorldInput
+
+=== Purity Audit (shared/src) ===
+
+shared\src\meter.ts:5: * Compute base green window half-width from player TIM rating.
+shared\src\rng.ts:5: * Create a deterministic Mulberry32 PRNG instance. Never uses Math.random().
+
+
+

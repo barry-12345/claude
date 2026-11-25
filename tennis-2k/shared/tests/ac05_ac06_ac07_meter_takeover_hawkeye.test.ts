@@ -5,8 +5,12 @@ import {
   computeShotQuality,
   createMatchState,
   createRng,
+  evaluateBounceBounds,
   launchHawkeyeTestBall,
+  makeTopspinVec,
+  solveBallisticShot,
   stepMatch,
+  type CourtId,
   type PlayerInputFrame,
 } from '../src/index.js';
 
@@ -77,8 +81,11 @@ describe('AC-05, AC-06 & AC-07: 2K Meter, Takeover & Hawkeye', () => {
           break;
         }
         const b = step.events.find((e) => e.type === 'BOUNCE');
-        if (b && b.type === 'BOUNCE' && b.bounceIndex === 1 && s.ball.predictedLanding) {
-          landingErr = Math.hypot(b.pos.x - s.ball.predictedLanding.x, b.pos.z - s.ball.predictedLanding.z);
+        if (b && b.type === 'BOUNCE' && b.bounceIndex === 1) {
+          // Compare actual first bounce directly against intended world target (aimX=0.4, aimZ=-0.2)
+          const idealTargetX = 0.4 * (COURT_DIM.SINGLES_HALF_WIDTH - 0.12);
+          const idealTargetZ = -(9.5 + 0.2 * 1.9);
+          landingErr = Math.hypot(b.pos.x - idealTargetX, b.pos.z - idealTargetZ);
           break;
         }
       }
@@ -257,18 +264,23 @@ describe('AC-05, AC-06 & AC-07: 2K Meter, Takeover & Hawkeye', () => {
     expect(state.players[0].takeoverCooldown).toBe(false);
   });
 
-  it('triggers Hawkeye via real physics on 8cm IN and 10cm OUT, and skips on 25cm', () => {
-    const runHawkeyeCase = (inBounds: boolean, distCm: number) => {
+  it('triggers Hawkeye via real physics on 8cm IN and 10cm OUT across all 3 courts (sideline & baseline), and skips on 25cm', () => {
+    const runHawkeyeCase = (
+      court: CourtId,
+      line: 'sideline' | 'baseline',
+      inBounds: boolean,
+      distCm: number
+    ) => {
       const rng = createRng(77);
       let state = createMatchState({
         mode: 'single',
-        court: 'hard',
+        court,
         format: 'fast4',
         archetypes: ['allcourt', 'allcourt'],
         aiDifficulty: 'rookie',
         seed: 77,
       });
-      state = launchHawkeyeTestBall(state, { inBounds, distCm, line: 'sideline' }, rng);
+      state = launchHawkeyeTestBall(state, { inBounds, distCm, line }, rng);
 
       let started: any = null;
       let ended: any = null;
@@ -289,25 +301,134 @@ describe('AC-05, AC-06 & AC-07: 2K Meter, Takeover & Hawkeye', () => {
       return { started, ended, finalPhase: state.phase };
     };
 
-    const in8 = runHawkeyeCase(true, 8);
-    expect(in8.started).toBeDefined();
-    expect(in8.started.hawkeye.isIn).toBe(true);
-    expect(in8.started.hawkeye.distanceToLineCm).toBeLessThanOrEqual(15);
-    expect(in8.ended?.isIn).toBe(true);
-    expect(in8.finalPhase).toBe('serve_ready');
+    for (const court of ['hard', 'clay', 'grass'] as const) {
+      for (const line of ['sideline', 'baseline'] as const) {
+        const in8 = runHawkeyeCase(court, line, true, 8);
+        expect(in8.started).not.toBeNull();
+        expect(in8.started.hawkeye.isIn).toBe(true);
+        expect(in8.started.hawkeye.lineType).toBe(line);
+        expect(in8.started.hawkeye.distanceToLineCm).toBeLessThanOrEqual(15);
+        expect(in8.ended?.isIn).toBe(true);
+        expect(in8.finalPhase).toBe('serve_ready');
 
-    const out10 = runHawkeyeCase(false, 10);
-    expect(out10.started).toBeDefined();
-    expect(out10.started.hawkeye.isIn).toBe(false);
-    expect(out10.started.hawkeye.distanceToLineCm).toBeLessThanOrEqual(15);
-    expect(out10.ended?.isIn).toBe(false);
+        const out10 = runHawkeyeCase(court, line, false, 10);
+        expect(out10.started).not.toBeNull();
+        expect(out10.started.hawkeye.isIn).toBe(false);
+        expect(out10.started.hawkeye.lineType).toBe(line);
+        expect(out10.started.hawkeye.distanceToLineCm).toBeLessThanOrEqual(15);
+        expect(out10.ended?.isIn).toBe(false);
 
-    const in25 = runHawkeyeCase(true, 25);
-    expect(in25.started).toBeNull();
-    expect(in25.finalPhase).toBe('point_over');
+        const in25 = runHawkeyeCase(court, line, true, 25);
+        expect(in25.started).toBeNull();
+        expect(in25.finalPhase).toBe('point_over');
 
-    const out25 = runHawkeyeCase(false, 25);
-    expect(out25.started).toBeNull();
-    expect(out25.finalPhase).toBe('point_over');
+        const out25 = runHawkeyeCase(court, line, false, 25);
+        expect(out25.started).toBeNull();
+        expect(out25.finalPhase).toBe('point_over');
+      }
+    }
+  });
+
+  it('never triggers Hawkeye or mislabels lines on 50-300cm obvious OUT balls near perpendicular lines', () => {
+    // 1) Rally ball 50 cm outside sideline (x=4.615) near baseline (z=-11.865)
+    const j1 = evaluateBounceBounds({ x: 4.615, y: COURT_DIM.BALL_RADIUS, z: -11.865 }, false, -1, 'deuce');
+    expect(j1.inBounds).toBe(false);
+    expect(j1.lineType).toBe('sideline');
+    expect(j1.distanceToLineCm).toBeCloseTo(50, 1);
+
+    // 2) Rally ball 91.5 cm past baseline (z=-12.8) near sideline (x=4.09)
+    const j2 = evaluateBounceBounds({ x: 4.09, y: COURT_DIM.BALL_RADIUS, z: -12.8 }, false, -1, 'deuce');
+    expect(j2.inBounds).toBe(false);
+    expect(j2.lineType).toBe('baseline');
+    expect(j2.distanceToLineCm).toBeCloseTo(91.5, 1);
+
+    // 3) Serve into wrong service box by 300 cm (x=+3.0 when target is [-4.115, 0]) near service line (z=-6.38)
+    const j3 = evaluateBounceBounds({ x: 3.0, y: COURT_DIM.BALL_RADIUS, z: -6.38 }, true, -1, 'deuce');
+    expect(j3.inBounds).toBe(false);
+    expect(j3.lineType).toBe('center_service_line');
+    expect(j3.distanceToLineCm).toBeCloseTo(300, 1);
+
+    // Verify none of them trigger HAWKEYE_START inside stepMatch
+    const rng = createRng(88);
+    for (const target of [
+      { x: 4.615, y: COURT_DIM.BALL_RADIUS, z: -11.865 },
+      { x: 4.09, y: COURT_DIM.BALL_RADIUS, z: -12.8 },
+    ]) {
+      let state = createMatchState({
+        mode: 'single',
+        court: 'hard',
+        format: 'fast4',
+        archetypes: ['allcourt', 'allcourt'],
+        aiDifficulty: 'rookie',
+        seed: 88,
+      });
+      const origin = { x: 0, y: 1.0, z: 10.5 };
+      const spin = makeTopspinVec(target.x - origin.x, target.z - origin.z, 35);
+      const solved = solveBallisticShot({
+        origin,
+        target,
+        desiredSpeedXZ: 25,
+        spin,
+        minNetClearanceM: 0.25,
+      });
+      state.phase = 'rally';
+      state.players[1].pos = { x: -5, y: 0, z: -13 };
+      state.ball.active = true;
+      state.ball.lastHitter = 0;
+      state.ball.lastShotType = 'topspin';
+      state.ball.pos = origin;
+      state.ball.vel = solved.vel;
+      state.ball.spin = spin;
+
+      let hawkeyeFired = false;
+      for (let t = 0; t < 240; t++) {
+        const res = stepMatch(state, [IDLE_INPUT, IDLE_INPUT], COURT_DIM.FIXED_DT, rng);
+        state = res.state;
+        if (res.events.some((e) => e.type === 'HAWKEYE_START')) hawkeyeFired = true;
+        if (state.phase === 'point_over' || state.phase === 'hawkeye') break;
+      }
+      expect(hawkeyeFired).toBe(false);
+      expect(state.phase).toBe('point_over');
+    }
+  });
+
+  it('rolls back firstServesTotal and totalMeterShots on serve LET replay', () => {
+    const rng = createRng(91);
+    let state = createMatchState({
+      mode: 'single',
+      court: 'hard',
+      format: 'fast4',
+      archetypes: ['allcourt', 'allcourt'],
+      aiDifficulty: 'rookie',
+      seed: 91,
+    });
+    // Launch a serve, force net-let flag while landing in deuce service box
+    state = stepMatch(
+      state,
+      [{ seq: 1, moveX: 0, moveZ: 0, aimX: 0, aimZ: 0, action: 'J', phase: 'hold' }, IDLE_INPUT],
+      COURT_DIM.FIXED_DT,
+      rng
+    ).state;
+    state.players[0].meter.progress = 0.78;
+    const hit = stepMatch(
+      state,
+      [{ seq: 2, moveX: 0, moveZ: 0, aimX: 0, aimZ: 0, action: 'J', phase: 'release' }, IDLE_INPUT],
+      COURT_DIM.FIXED_DT,
+      rng
+    );
+    state = hit.state;
+    expect(state.stats[0].firstServesTotal).toBe(1);
+    expect(state.stats[0].totalMeterShots).toBe(1);
+
+    // Simulate ball clipping net cord and bouncing inside deuce box (-2.0, -4.5)
+    state.ball.touchedNet = true;
+    state.ball.pos = { x: -2.0, y: 0.04, z: -4.5 };
+    state.ball.vel = { x: 0, y: -5.0, z: -12.0 };
+    const bounceStep = stepMatch(state, [IDLE_INPUT, IDLE_INPUT], COURT_DIM.FIXED_DT, rng);
+    expect(bounceStep.state.phase).toBe('serve_ready');
+    expect(bounceStep.state.score.serveNumber).toBe(1);
+    expect(bounceStep.state.stats[0].firstServesTotal).toBe(0);
+    expect(bounceStep.state.stats[0].totalMeterShots).toBe(0);
+    expect(bounceStep.state.stats[0].perfectShots).toBe(0);
   });
 });

@@ -147,6 +147,44 @@ describe('AC-08 & AC-09: Scoring State Machines, Stats & 3-Tier AI Benchmark', (
     const patched = applyScorePatch(base, { points: [1, 3], server: 0 });
     expect(patched.score.keyPointLabel).toBe('BREAK_POINT');
     expect(patched.score.courtSide).toBe('deuce');
+
+    // Regression: applyScorePatch from dirty hawkeye/rally/meter/slide state resets all transient fields
+    const dirty = createMatchState({
+      mode: 'single',
+      court: 'hard',
+      format: 'fast4',
+      archetypes: ['allcourt', 'allcourt'],
+      aiDifficulty: 'rookie',
+      seed: 2,
+    });
+    dirty.phase = 'hawkeye';
+    dirty.phaseTimer = 1.25;
+    dirty.hawkeye.active = true;
+    dirty.hawkeye.elapsedSec = 0.9;
+    dirty.players[0].meter.active = true;
+    dirty.players[0].meter.action = 'J';
+    dirty.players[0].meter.progress = 0.6;
+    dirty.players[1].isSliding = true;
+    dirty.players[1].slideTimer = 0.2;
+    dirty.ball.active = true;
+    dirty.ball.bounces = 2;
+    dirty.ball.firstBouncePos = { x: 2, y: COURT_DIM.BALL_RADIUS, z: -8 };
+    dirty.ball.predictedLanding = { x: 2.1, y: COURT_DIM.BALL_RADIUS, z: -8.1 };
+    dirty.ball.lastHitter = 0;
+
+    const cleanPatched = applyScorePatch(dirty, { games: [3, 2], points: [3, 0], server: 1 });
+    expect(cleanPatched.phase).toBe('serve_ready');
+    expect(cleanPatched.phaseTimer).toBe(0);
+    expect(cleanPatched.hawkeye.active).toBe(false);
+    expect(cleanPatched.hawkeye.elapsedSec).toBe(0);
+    expect(cleanPatched.players[0].meter.active).toBe(false);
+    expect(cleanPatched.players[0].meter.progress).toBe(0);
+    expect(cleanPatched.players[1].isSliding).toBe(false);
+    expect(cleanPatched.ball.active).toBe(false);
+    expect(cleanPatched.ball.bounces).toBe(0);
+    expect(cleanPatched.ball.firstBouncePos).toBeNull();
+    expect(cleanPatched.ball.predictedLanding).toBeNull();
+    expect(cleanPatched.ball.lastHitter).toBeNull();
   });
 
   it('is 100% deterministic for identical seed', () => {

@@ -232,14 +232,42 @@ export function applyScorePatch(state: MatchState, patch: ScorePatch): MatchStat
   const { serverPos, receiverPos } = computeServeSetupPositions(next.score);
   const srvIdx = next.score.server;
   const rcvIdx = (1 - srvIdx) as PlayerIndex;
-  next.players[srvIdx].pos = serverPos;
-  next.players[srvIdx].vel = { x: 0, y: 0, z: 0 };
-  next.players[rcvIdx].pos = receiverPos;
-  next.players[rcvIdx].vel = { x: 0, y: 0, z: 0 };
+
+  for (const idx of [0, 1] as const) {
+    const p = next.players[idx];
+    p.pos = idx === srvIdx ? serverPos : receiverPos;
+    p.vel = { x: 0, y: 0, z: 0 };
+    p.yaw = p.side === 1 ? 0 : Math.PI;
+    p.anim = 'idle';
+    p.animTime = 0;
+    p.isSliding = false;
+    p.slideTimer = 0;
+    p.moveAccelTime = 0;
+    p.meter.active = false;
+    p.meter.action = 'none';
+    p.meter.progress = 0;
+  }
+
   next.phase = 'serve_ready';
-  next.ball.active = false;
-  next.ball.pos = { x: serverPos.x, y: 1.05, z: serverPos.z - next.players[srvIdx].side * 0.35 };
-  next.ball.vel = { x: 0, y: 0, z: 0 };
-  next.ball.spin = { x: 0, y: 0, z: 0 };
+  next.phaseTimer = 0;
+  next.hawkeye.active = false;
+  next.hawkeye.elapsedSec = 0;
+
+  next.ball = {
+    pos: { x: serverPos.x, y: 1.05, z: serverPos.z - next.players[srvIdx].side * 0.35 },
+    vel: { x: 0, y: 0, z: 0 },
+    spin: { x: 0, y: 0, z: 0 },
+    active: false,
+    bounces: 0,
+    touchedNet: false,
+    hitTick: next.tick,
+    firstBouncePos: null,
+    firstBounceInBounds: null,
+    lastHitter: null,
+    lastShotType: null,
+    lastShotQuality: null,
+    speedKmhDisplay: 0,
+    predictedLanding: null,
+  };
   return next;
 }

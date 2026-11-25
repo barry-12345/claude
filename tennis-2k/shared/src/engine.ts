@@ -373,7 +373,9 @@ function executeServeLaunch(
   }
 
   const baseDepth = shotType === 'serve_flat' ? 5.65 : 5.15;
-  let targetZ = targetSide * (baseDepth - clamp(-input.aimZ * srv.side, -1, 1) * 0.45);
+  const forwardAimZ = clamp(-input.aimZ * srv.side, -1, 1);
+  const depth = clamp(baseDepth + forwardAimZ * 0.45, 3.8, COURT_DIM.SERVICE_LINE_Z - 0.16);
+  let targetZ = targetSide * depth;
 
   const powMult = computePowerMultiplier(arch.power);
   const spinMult = computeSpinMultiplier(arch.spin);
@@ -715,6 +717,47 @@ function finalizePoint(
   state.phaseTimer = PHYSICS_CONSTANTS.POINT_OVER_DURATION_SEC;
 }
 
+function enterDisconnectPauseFromPlay(state: MatchState): void {
+  const discIdx: PlayerIndex = state.pause.disconnected[0] ? 0 : 1;
+  state.pause.pausedFromPhase = 'serve_ready';
+  state.phase = 'paused_disconnect';
+  state.pause.reason = 'disconnect';
+  state.pause.initiatedBy = discIdx;
+  state.pause.resumeCountdownSec = 0;
+  state.pause.remainingSec = Math.min(
+    state.pause.disconnected[0] ? state.pause.disconnectRemainingSec[0] : COURT_DIM.DISCONNECT_GRACE_SEC,
+    state.pause.disconnected[1] ? state.pause.disconnectRemainingSec[1] : COURT_DIM.DISCONNECT_GRACE_SEC
+  );
+}
+
+function buildHawkeyeCandidateFromFirstBounce(
+  state: MatchState,
+  isServeBall: boolean,
+  targetSide: PlayerSide
+): {
+  bouncePos: Vec3;
+  isIn: boolean;
+  distanceToLineCm: number;
+  lineType: HawkeyeState['lineType'];
+} | null {
+  const firstPos = state.ball.firstBouncePos;
+  if (!firstPos || firstPos.z * targetSide <= 0) {
+    return null;
+  }
+  const firstJudgment = evaluateBounceBounds(
+    firstPos,
+    isServeBall,
+    targetSide,
+    state.score.courtSide
+  );
+  return {
+    bouncePos: firstPos,
+    isIn: firstJudgment.inBounds,
+    distanceToLineCm: firstJudgment.distanceToLineCm,
+    lineType: firstJudgment.lineType,
+  };
+}
+
 function handleServeFault(state: MatchState, serverIdx: PlayerIndex, events: GameEvent[]): void {
   if (state.score.serveNumber === 1) {
     state.score.serveNumber = 2;
@@ -836,9 +879,7 @@ export function stepMatch(
       } else {
         resetPlayersForServe(next);
         if (next.pause.disconnected[0] || next.pause.disconnected[1]) {
-          next.pause.pausedFromPhase = 'serve_ready';
-          next.phase = 'paused_disconnect';
-          next.pause.reason = 'disconnect';
+          enterDisconnectPauseFromPlay(next);
         }
       }
     }
@@ -865,9 +906,7 @@ export function stepMatch(
       } else {
         resetPlayersForServe(next);
         if (next.pause.disconnected[0] || next.pause.disconnected[1]) {
-          next.pause.pausedFromPhase = 'serve_ready';
-          next.phase = 'paused_disconnect';
-          next.pause.reason = 'disconnect';
+          enterDisconnectPauseFromPlay(next);
         }
       }
     }
@@ -1065,7 +1104,17 @@ export function stepMatch(
           });
 
           if (isServeBall && next.ball.touchedNet && judgment.inBounds) {
-            // Serve LET: replay serve without fault
+            // Serve LET: replay serve without fault and rollback serve meter/1st-serve attempt stats
+            next.stats[hitter].totalMeterShots = Math.max(0, next.stats[hitter].totalMeterShots - 1);
+            if (next.ball.lastShotQuality === 'PERFECT') {
+              next.stats[hitter].perfectShots = Math.max(0, next.stats[hitter].perfectShots - 1);
+            }
+            if (next.score.serveNumber === 1) {
+              next.stats[hitter].firstServesTotal = Math.max(
+                0,
+                next.stats[hitter].firstServesTotal - 1
+              );
+            }
             resetPlayersForServe(next);
             return { state: next, events };
           }
@@ -1103,28 +1152,11 @@ export function stepMatch(
             inBounds: true,
           });
 
-          const firstPos = next.ball.firstBouncePos;
-          let hawkeyeCandidate: {
-            bouncePos: Vec3;
-            isIn: boolean;
-            distanceToLineCm: number;
-            lineType: HawkeyeState['lineType'];
-          } | null = null;
-          if (firstPos) {
-            const firstJudgment = evaluateBounceBounds(
-              firstPos,
-              isServeBall,
-              targetSide,
-              next.score.courtSide
-            );
-            hawkeyeCandidate = {
-              bouncePos: firstPos,
-              isIn: firstJudgment.inBounds,
-              distanceToLineCm: firstJudgment.distanceToLineCm,
-              lineType: firstJudgment.lineType,
-            };
-          }
-
+          const hawkeyeCandidate = buildHawkeyeCandidateFromFirstBounce(
+            next,
+            isServeBall,
+            targetSide
+          );
           const reason = isServeBall ? 'ace' : 'winner';
           finalizePoint(next, hitter, reason, hawkeyeCandidate, events);
           return { state: next, events };
@@ -1132,11 +1164,8 @@ export function stepMatch(
       }
     }
 
-    // Safety out-of-arena bounds check (e.g. sky-high out ball)
-    if (
-      Math.abs(next.ball.pos.z) > 22 ||
-      Math.abs(next.ball.pos.x) > 14
-    ) {
+    // Safety out-of-arena bounds check (e.g. fast baseline winner exiting |z|>22 before 2nd bounce)
+    if (Math.abs(next.ball.pos.z) > 22 || Math.abs(next.ball.pos.x) > 14) {
       if (next.ball.bounces === 0) {
         if (isServeBall) {
           handleServeFault(next, hitter, events);
@@ -1144,8 +1173,13 @@ export function stepMatch(
           finalizePoint(next, (1 - hitter) as PlayerIndex, 'out', null, events);
         }
       } else {
+        const hawkeyeCandidate = buildHawkeyeCandidateFromFirstBounce(
+          next,
+          isServeBall,
+          targetSide
+        );
         const reason = isServeBall ? 'ace' : 'winner';
-        finalizePoint(next, hitter, reason, null, events);
+        finalizePoint(next, hitter, reason, hawkeyeCandidate, events);
       }
     }
   }

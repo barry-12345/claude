@@ -167,6 +167,7 @@ export interface BounceJudgment {
 
 /**
  * Evaluate ITF line-mark bounds and nearest line distance for a bounce on targetSide's half.
+ * When out of bounds, distanceToLineCm & lineType strictly reflect the violated boundary line(s).
  */
 export function evaluateBounceBounds(
   pos: Vec3,
@@ -176,6 +177,7 @@ export function evaluateBounceBounds(
 ): BounceJudgment {
   const rMark = COURT_DIM.BALL_RADIUS;
   const inTargetHalf = pos.z * targetSide > 0;
+  const roundCm = (meters: number) => Number((meters * 100).toFixed(2));
 
   if (!isServe) {
     const inX = Math.abs(pos.x) <= COURT_DIM.SINGLES_HALF_WIDTH + rMark;
@@ -187,17 +189,24 @@ export function evaluateBounceBounds(
     const dSideline = Math.min(dLeft, dRight);
     const dBaseline = Math.abs(pos.z - targetSide * COURT_DIM.HALF_LENGTH);
 
-    if (dSideline <= dBaseline) {
-      return {
-        inBounds,
-        distanceToLineCm: Number((dSideline * 100).toFixed(2)),
-        lineType: 'sideline',
-      };
+    if (inBounds) {
+      if (dSideline <= dBaseline) {
+        return { inBounds: true, distanceToLineCm: roundCm(dSideline), lineType: 'sideline' };
+      }
+      return { inBounds: true, distanceToLineCm: roundCm(dBaseline), lineType: 'baseline' };
     }
+
+    if (!inX && inZ) {
+      return { inBounds: false, distanceToLineCm: roundCm(dSideline), lineType: 'sideline' };
+    }
+    if (inX && !inZ) {
+      return { inBounds: false, distanceToLineCm: roundCm(dBaseline), lineType: 'baseline' };
+    }
+    const cornerDist = Math.hypot(dSideline, dBaseline);
     return {
-      inBounds,
-      distanceToLineCm: Number((dBaseline * 100).toFixed(2)),
-      lineType: 'baseline',
+      inBounds: false,
+      distanceToLineCm: roundCm(cornerDist),
+      lineType: dBaseline >= dSideline ? 'baseline' : 'sideline',
     };
   }
 
@@ -216,17 +225,45 @@ export function evaluateBounceBounds(
   const dOuter = Math.abs(pos.x - expectedSignX * COURT_DIM.SINGLES_HALF_WIDTH);
   const dServiceZ = Math.abs(pos.z - targetSide * COURT_DIM.SERVICE_LINE_Z);
 
-  const candidates: Array<{ dist: number; lineType: HawkeyeState['lineType'] }> = [
-    { dist: dOuter, lineType: 'sideline' },
-    { dist: dCenter, lineType: 'center_service_line' },
-    { dist: dServiceZ, lineType: 'service_line' },
-  ];
-  candidates.sort((a, b) => a.dist - b.dist);
+  if (inBounds) {
+    const candidates: Array<{ dist: number; lineType: HawkeyeState['lineType'] }> = [
+      { dist: dOuter, lineType: 'sideline' },
+      { dist: dCenter, lineType: 'center_service_line' },
+      { dist: dServiceZ, lineType: 'service_line' },
+    ];
+    candidates.sort((a, b) => a.dist - b.dist);
+    return {
+      inBounds: true,
+      distanceToLineCm: roundCm(candidates[0].dist),
+      lineType: candidates[0].lineType,
+    };
+  }
 
+  const xViolation: { dist: number; lineType: 'center_service_line' | 'sideline' } =
+    pos.x * expectedSignX < 0
+      ? { dist: dCenter, lineType: 'center_service_line' }
+      : { dist: dOuter, lineType: 'sideline' };
+
+  if (!inX && inZ) {
+    return {
+      inBounds: false,
+      distanceToLineCm: roundCm(xViolation.dist),
+      lineType: xViolation.lineType,
+    };
+  }
+  if (inX && !inZ) {
+    return {
+      inBounds: false,
+      distanceToLineCm: roundCm(dServiceZ),
+      lineType: 'service_line',
+    };
+  }
+
+  const cornerDist = Math.hypot(xViolation.dist, dServiceZ);
   return {
-    inBounds,
-    distanceToLineCm: Number((candidates[0].dist * 100).toFixed(2)),
-    lineType: candidates[0].lineType,
+    inBounds: false,
+    distanceToLineCm: roundCm(cornerDist),
+    lineType: dServiceZ >= xViolation.dist ? 'service_line' : xViolation.lineType,
   };
 }
 
