@@ -3,7 +3,7 @@ export * from './constants.js';
 export * from './rng.js';
 export * from './mirror.js';
 export * from './physics.js';
-export * from './meter.js';
+export * from './ratings.js';
 export * from './rules.js';
 export * from './pause.js';
 export * from './ai.js';

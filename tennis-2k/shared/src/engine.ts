@@ -1,13 +1,22 @@
 import { ARCHETYPES, COURT_DIM, COURTS, PHYSICS_CONSTANTS } from './constants.js';
+import { cloneMatchState, cloneVec3 } from './mirror.js';
 import {
+  clamp,
+  evaluateBounceBounds,
+  makeTopspinVec,
+  solveBallisticShot,
+  stepBallSubstep,
+} from './physics.js';
+import {
+  computeControlScatterM,
+  computeFirstServeCornerFaultProb,
   computeNetAccuracyMultiplier,
   computePlayerMaxSpeed,
+  computePositionShotQuality,
   computePowerMultiplier,
-  computeShotQuality,
   computeSpinMultiplier,
-} from './meter.js';
-import { cloneMatchState, cloneVec3 } from './mirror.js';
-import { clamp, evaluateBounceBounds, makeTopspinVec, solveBallisticShot, stepBallSubstep } from './physics.js';
+  computeStretchSidelineErrorProb,
+} from './ratings.js';
 import {
   awardPointToScore,
   computeServeSetupPositions,
@@ -15,6 +24,7 @@ import {
   createInitialScoreState,
 } from './rules.js';
 import type {
+  BallState,
   GameEvent,
   HawkeyeState,
   MatchConfig,
@@ -25,9 +35,22 @@ import type {
   PlayerState,
   PRNG,
   ShotQuality,
+  ShotStanceState,
   ShotType,
+  SpawnIncomingBallOptions,
   Vec3,
 } from './types.js';
+
+function createDefaultStance(lastQuality: ShotQuality | null = null): ShotStanceState {
+  return {
+    armedAction: 'none',
+    holdDurationSec: 0,
+    bufferRemainingSec: 0,
+    lastConsumedHitTick: -1,
+    lockedAimX: 0,
+    lastQuality,
+  };
+}
 
 function createInitialPlayer(
   index: PlayerIndex,
@@ -47,17 +70,7 @@ function createInitialPlayer(
     isSliding: false,
     slideTimer: 0,
     moveAccelTime: 0,
-    meter: {
-      active: false,
-      action: 'none',
-      progress: 0,
-      sweetCenter: PHYSICS_CONSTANTS.METER_SWEET_CENTER,
-      effectiveHalfWidth: 0.055,
-      lastQuality: null,
-    },
-    takeoverEnergy: 0,
-    takeoverPointsLeft: 0,
-    takeoverCooldown: false,
+    stance: createDefaultStance(),
   };
 }
 
@@ -85,7 +98,6 @@ function resetBallOnServer(state: MatchState): void {
 function resetPlayersForServe(state: MatchState): void {
   const { serverPos, receiverPos } = computeServeSetupPositions(state.score);
   const srvIdx = state.score.server;
-  const rcvIdx = (1 - srvIdx) as PlayerIndex;
 
   for (const idx of [0, 1] as const) {
     const p = state.players[idx];
@@ -97,9 +109,7 @@ function resetPlayersForServe(state: MatchState): void {
     p.isSliding = false;
     p.slideTimer = 0;
     p.moveAccelTime = 0;
-    p.meter.active = false;
-    p.meter.action = 'none';
-    p.meter.progress = 0;
+    p.stance = createDefaultStance(p.stance.lastQuality);
   }
 
   state.phase = 'serve_ready';
@@ -117,7 +127,7 @@ export function createMatchState(config: MatchConfig): MatchState {
   const p0 = createInitialPlayer(0, config.archetypes[0], serverPos);
   const p1 = createInitialPlayer(1, config.archetypes[1], receiverPos);
 
-  const state: MatchState = {
+  return {
     tick: 0,
     config: {
       ...config,
@@ -165,46 +175,23 @@ export function createMatchState(config: MatchConfig): MatchState {
     },
     lastAckSeq: [0, 0],
   };
-
-  return state;
 }
 
-function addTakeoverEnergy(
-  player: PlayerState,
-  delta: number,
-  events: GameEvent[]
-): void {
-  if (delta > 0) {
-    // Do not accumulate while active or during 1-point cooldown
-    if (player.takeoverPointsLeft > 0 || player.takeoverCooldown) {
-      return;
-    }
-    player.takeoverEnergy = clamp(player.takeoverEnergy + delta, 0, PHYSICS_CONSTANTS.TAKEOVER_MAX_ENERGY);
-    if (player.takeoverEnergy >= PHYSICS_CONSTANTS.TAKEOVER_MAX_ENERGY) {
-      player.takeoverPointsLeft = PHYSICS_CONSTANTS.TAKEOVER_DURATION_POINTS;
-      events.push({ type: 'TAKEOVER_ON', player: player.index });
-    }
-  } else if (delta < 0) {
-    if (player.takeoverPointsLeft > 0 || player.takeoverCooldown) {
-      return;
-    }
-    player.takeoverEnergy = clamp(player.takeoverEnergy + delta, 0, PHYSICS_CONSTANTS.TAKEOVER_MAX_ENERGY);
+function clampPlayerPosition(player: PlayerState, state: MatchState): void {
+  if (state.phase === 'serve_ready' && state.score.server === player.index) {
+    const sideSign = state.score.courtSide === 'deuce' ? 1 : -1;
+    const minBound = player.side * sideSign > 0 ? 0.25 : -COURT_DIM.SINGLES_HALF_WIDTH;
+    const maxBound = player.side * sideSign > 0 ? COURT_DIM.SINGLES_HALF_WIDTH : -0.25;
+    player.pos.x = clamp(player.pos.x, minBound, maxBound);
+    player.pos.z = player.side * (COURT_DIM.HALF_LENGTH + 0.55);
+    return;
   }
-}
 
-function advanceTakeoverOnPointEnd(state: MatchState, events: GameEvent[]): void {
-  for (const idx of [0, 1] as const) {
-    const p = state.players[idx];
-    if (p.takeoverPointsLeft > 0) {
-      p.takeoverPointsLeft -= 1;
-      if (p.takeoverPointsLeft === 0) {
-        p.takeoverEnergy = 0;
-        p.takeoverCooldown = true;
-        events.push({ type: 'TAKEOVER_OFF', player: idx });
-      }
-    } else if (p.takeoverCooldown) {
-      p.takeoverCooldown = false;
-    }
+  player.pos.x = clamp(player.pos.x, -COURT_DIM.RUN_LIMIT_X, COURT_DIM.RUN_LIMIT_X);
+  if (player.side === 1) {
+    player.pos.z = clamp(player.pos.z, COURT_DIM.RUN_LIMIT_Z_MIN, COURT_DIM.RUN_LIMIT_Z_MAX);
+  } else {
+    player.pos.z = clamp(player.pos.z, -COURT_DIM.RUN_LIMIT_Z_MAX, -COURT_DIM.RUN_LIMIT_Z_MIN);
   }
 }
 
@@ -256,21 +243,21 @@ function updatePlayerMovement(
     if (Math.hypot(player.vel.x, player.vel.z) < 0.15) {
       player.vel.x = 0;
       player.vel.z = 0;
-      if (!player.meter.active) {
+      const inSwingAnim =
+        (player.anim === 'forehand' || player.anim === 'backhand' || player.anim === 'lob') &&
+        player.animTime < 0.34;
+      if (!inSwingAnim) {
         player.anim = 'idle';
       }
     }
   } else {
-    // Allow fractional speed (e.g. AI speedScale <= 1) without inflating > 1
     const norm = mag > 1 ? 1 / mag : 1;
     mx *= norm;
     mz *= norm;
 
-    const isTakeover = player.takeoverPointsLeft > 0;
-    const accelBoost = isTakeover ? PHYSICS_CONSTANTS.TAKEOVER_ACCEL_BOOST : 1.0;
     player.moveAccelTime = Math.min(
       PHYSICS_CONSTANTS.PLAYER_ACCEL_TIME_SEC,
-      player.moveAccelTime + dt * accelBoost
+      player.moveAccelTime + dt
     );
     const ramp = 0.35 + 0.65 * (player.moveAccelTime / PHYSICS_CONSTANTS.PLAYER_ACCEL_TIME_SEC);
     const maxSpeed = computePlayerMaxSpeed(arch.speed);
@@ -282,7 +269,7 @@ function updatePlayerMovement(
     player.vel.z += (targetVz - player.vel.z) * blend;
     player.anim = 'run';
 
-    // Check extreme-reach auto slide trigger during rally
+    // Extreme-reach auto slide trigger during rally
     if (state.phase === 'rally' && state.ball.active && state.ball.lastHitter !== idx) {
       const landing = state.ball.predictedLanding;
       if (landing && landing.z * player.side > 0) {
@@ -315,30 +302,12 @@ function updatePlayerMovement(
   clampPlayerPosition(player, state);
 }
 
-function clampPlayerPosition(player: PlayerState, state: MatchState): void {
-  if (state.phase === 'serve_ready' && state.score.server === player.index) {
-    const sideSign = state.score.courtSide === 'deuce' ? 1 : -1;
-    const minBound = player.side * sideSign > 0 ? 0.25 : -COURT_DIM.SINGLES_HALF_WIDTH;
-    const maxBound = player.side * sideSign > 0 ? COURT_DIM.SINGLES_HALF_WIDTH : -0.25;
-    player.pos.x = clamp(player.pos.x, minBound, maxBound);
-    player.pos.z = player.side * (COURT_DIM.HALF_LENGTH + 0.55);
-    return;
-  }
-
-  player.pos.x = clamp(player.pos.x, -COURT_DIM.RUN_LIMIT_X, COURT_DIM.RUN_LIMIT_X);
-  if (player.side === 1) {
-    player.pos.z = clamp(player.pos.z, COURT_DIM.RUN_LIMIT_Z_MIN, COURT_DIM.RUN_LIMIT_Z_MAX);
-  } else {
-    player.pos.z = clamp(player.pos.z, -COURT_DIM.RUN_LIMIT_Z_MAX, -COURT_DIM.RUN_LIMIT_Z_MIN);
-  }
-}
-
 function executeServeLaunch(
   state: MatchState,
   serverIdx: PlayerIndex,
   shotType: 'serve_flat' | 'serve_kick',
-  quality: ShotQuality,
-  input: PlayerInputFrame,
+  lockedAimX: number,
+  aimZ: number,
   rng: PRNG,
   events: GameEvent[]
 ): void {
@@ -347,73 +316,60 @@ function executeServeLaunch(
   const targetSide = (-srv.side) as PlayerSide;
   const courtSide = state.score.courtSide;
 
+  const expectedSignX = targetSide * (courtSide === 'deuce' ? 1 : -1);
+  const boxCenterX = expectedSignX * 2.05;
+  const aimOffsetX = clamp(lockedAimX, -1, 1) * 1.85;
+  const minBoxX = expectedSignX > 0 ? 0.16 : -COURT_DIM.SINGLES_HALF_WIDTH + 0.16;
+  const maxBoxX = expectedSignX > 0 ? COURT_DIM.SINGLES_HALF_WIDTH - 0.16 : -0.16;
+  let targetX = clamp(boxCenterX + aimOffsetX, minBoxX, maxBoxX);
+
+  const baseDepth = shotType === 'serve_flat' ? 5.75 : 5.15;
+  const forwardAimZ = clamp(-aimZ * srv.side, -1, 1);
+  const maxDepth =
+    shotType === 'serve_kick' ? COURT_DIM.SERVICE_LINE_Z - 0.25 : COURT_DIM.SERVICE_LINE_Z - 0.20;
+  const depth = clamp(baseDepth + forwardAimZ * 0.35, 3.8, maxDepth);
+  let targetZ = targetSide * depth;
+
+  let quality: ShotQuality = 'CLEAN';
+
+  if (shotType === 'serve_flat' && Math.abs(lockedAimX) > 0.85) {
+    const pFault = computeFirstServeCornerFaultProb(arch.control);
+    if (rng.next() < pFault) {
+      quality = 'SOLID';
+      if (Math.abs(targetX) > 2.05) {
+        // Miss wide past outer sideline by 0.10-0.42 m
+        targetX = expectedSignX * (COURT_DIM.SINGLES_HALF_WIDTH + rng.range(0.14, 0.40));
+      } else if (rng.next() < 0.5) {
+        // Miss across center service line
+        targetX = -expectedSignX * rng.range(0.14, 0.38);
+      } else {
+        // Miss long past service line
+        targetZ = targetSide * (COURT_DIM.SERVICE_LINE_Z + rng.range(0.14, 0.40));
+      }
+    }
+  }
+
+  if (quality === 'CLEAN') {
+    const cleanScatter = computeControlScatterM('CLEAN', arch.control);
+    targetX = clamp(targetX + rng.range(-cleanScatter, cleanScatter), minBoxX, maxBoxX);
+    targetZ =
+      targetSide *
+      clamp(Math.abs(targetZ) + rng.range(-cleanScatter, cleanScatter), 3.75, maxDepth);
+  }
+
   // Stats updates
-  state.stats[serverIdx].totalMeterShots += 1;
-  if (quality === 'PERFECT') {
-    state.stats[serverIdx].perfectShots += 1;
-    addTakeoverEnergy(srv, 34, events);
-  } else if (quality === 'GOOD') {
-    addTakeoverEnergy(srv, 10, events);
+  state.stats[serverIdx].totalShots += 1;
+  if (quality === 'CLEAN') {
+    state.stats[serverIdx].cleanShots += 1;
   }
   if (state.score.serveNumber === 1) {
     state.stats[serverIdx].firstServesTotal += 1;
   }
 
-  // Target service box center & aim offset
-  // targetSide === -1 (P0 serving): deuce -> x in [-4.115, 0], ad -> [0, 4.115]
-  // targetSide === +1 (P1 serving): deuce -> x in [0, 4.115], ad -> [-4.115, 0]
-  const expectedSignX = targetSide * (courtSide === 'deuce' ? 1 : -1);
-  const boxCenterX = expectedSignX * 2.05;
-  const aimOffsetX = clamp(input.aimX, -1, 1) * 1.45;
-  let targetX = clamp(boxCenterX + aimOffsetX, -COURT_DIM.SINGLES_HALF_WIDTH + 0.14, COURT_DIM.SINGLES_HALF_WIDTH - 0.14);
-  if (expectedSignX > 0) {
-    targetX = clamp(boxCenterX + aimOffsetX, 0.14, COURT_DIM.SINGLES_HALF_WIDTH - 0.14);
-  } else {
-    targetX = clamp(boxCenterX + aimOffsetX, -COURT_DIM.SINGLES_HALF_WIDTH + 0.14, -0.14);
-  }
-
-  const baseDepth = shotType === 'serve_flat' ? 5.65 : 5.15;
-  const forwardAimZ = clamp(-input.aimZ * srv.side, -1, 1);
-  const depth = clamp(baseDepth + forwardAimZ * 0.45, 3.8, COURT_DIM.SERVICE_LINE_Z - 0.16);
-  let targetZ = targetSide * depth;
-
   const powMult = computePowerMultiplier(arch.power);
   const spinMult = computeSpinMultiplier(arch.spin);
-  const baseSpeed = shotType === 'serve_flat' ? 37.5 : 27.5;
-  let speedMult = 1.0;
-
-  if (quality === 'PERFECT') {
-    speedMult = 1.16;
-    // Tight accurate placement
-    targetX += rng.range(-0.04, 0.04);
-    targetZ += rng.range(-0.04, 0.04);
-  } else if (quality === 'GOOD') {
-    speedMult = 1.0;
-    targetX += rng.range(-0.32, 0.32);
-    targetZ += rng.range(-0.32, 0.32);
-  } else if (quality === 'EARLY' || quality === 'LATE') {
-    speedMult = 0.78;
-    targetX += rng.range(-0.85, 0.85);
-    targetZ += targetSide * (quality === 'EARLY' ? -0.85 : 0.95);
-  } else {
-    // VERY_EARLY / VERY_LATE: Red zone
-    speedMult = 0.62;
-    if (shotType === 'serve_flat') {
-      // 1st serve red zone is 100% fault (long or into net)
-      if (quality === 'VERY_EARLY') {
-        targetX += expectedSignX * 1.65;
-        targetZ = targetSide * (COURT_DIM.SERVICE_LINE_Z + 0.95);
-      } else {
-        // VERY_LATE: hits net or deep fault
-        targetZ = targetSide * (COURT_DIM.SERVICE_LINE_Z + 1.15);
-      }
-    } else {
-      targetX += rng.range(-1.45, 1.45);
-      targetZ += targetSide * rng.range(-1.1, 1.35);
-    }
-  }
-
-  const desiredSpeedXZ = baseSpeed * powMult * speedMult;
+  const baseSpeed = shotType === 'serve_flat' ? 38.5 : 28.0;
+  const desiredSpeedXZ = baseSpeed * powMult;
   const origin: Vec3 = { x: srv.pos.x, y: 2.78, z: srv.pos.z - srv.side * 0.25 };
   const target: Vec3 = { x: targetX, y: COURT_DIM.BALL_RADIUS, z: targetZ };
 
@@ -425,30 +381,8 @@ function executeServeLaunch(
     target,
     desiredSpeedXZ,
     spin,
-    minNetClearanceM: shotType === 'serve_flat' ? 0.05 : 0.34,
+    minNetClearanceM: shotType === 'serve_flat' ? 0.08 : 0.36,
   });
-
-  // Ensure 1st serve red-zone is 100% fault (net or long/wide)
-  if (shotType === 'serve_flat' && quality === 'VERY_EARLY') {
-    // Pull clearly wide outside service box
-    const wideTarget: Vec3 = {
-      x: expectedSignX * (COURT_DIM.SINGLES_HALF_WIDTH + 0.75),
-      y: COURT_DIM.BALL_RADIUS,
-      z: targetSide * 5.8,
-    };
-    const wideSolved = solveBallisticShot({
-      origin,
-      target: wideTarget,
-      desiredSpeedXZ,
-      spin,
-      minNetClearanceM: 0.05,
-    });
-    solved.vel = wideSolved.vel;
-    solved.predictedLanding = wideSolved.predictedLanding;
-  } else if (shotType === 'serve_flat' && quality === 'VERY_LATE') {
-    // Either long past service line (already solved with +1.15m) or into the net
-    // Keep solved trajectory landing deep past SERVICE_LINE_Z (6.40m)
-  }
 
   state.ball.pos = origin;
   state.ball.vel = solved.vel;
@@ -465,13 +399,18 @@ function executeServeLaunch(
   state.ball.predictedLanding = cloneVec3(solved.predictedLanding);
 
   const physSpeed = Math.hypot(solved.vel.x, solved.vel.y, solved.vel.z);
-  const displayScale = shotType === 'serve_flat' ? 4.8 : 5.05;
-  state.ball.speedKmhDisplay = Math.round(clamp(physSpeed * displayScale, 95, 222));
+  if (shotType === 'serve_flat') {
+    state.ball.speedKmhDisplay = Math.round(clamp(physSpeed * 4.55, 182, 216));
+  } else {
+    state.ball.speedKmhDisplay = Math.round(clamp(physSpeed * 4.65, 140, 166));
+  }
 
   srv.anim = 'forehand';
   srv.animTime = 0;
-  srv.meter.active = false;
-  srv.meter.lastQuality = quality;
+  srv.stance.armedAction = 'none';
+  srv.stance.holdDurationSec = 0;
+  srv.stance.bufferRemainingSec = 0;
+  srv.stance.lastQuality = quality;
   state.phase = 'rally';
   state.phaseTimer = 0;
 
@@ -497,85 +436,95 @@ function executeRallyShot(
   const hitter = state.players[hitterIdx];
   const arch = ARCHETYPES[hitter.archetype];
   const targetSide = (-hitter.side) as PlayerSide;
-  const forwardAimZ = -clamp(input.aimZ, -1, 1) * hitter.side; // +1 = deeper toward opponent baseline, -1 = shallower
+  const forwardAimZ = -clamp(input.aimZ, -1, 1) * hitter.side;
 
-  state.stats[hitterIdx].totalMeterShots += 1;
-  if (quality === 'PERFECT') {
-    state.stats[hitterIdx].perfectShots += 1;
-    addTakeoverEnergy(hitter, 34, events);
-  } else if (quality === 'GOOD') {
-    addTakeoverEnergy(hitter, 10, events);
+  state.stats[hitterIdx].totalShots += 1;
+  if (quality === 'CLEAN') {
+    state.stats[hitterIdx].cleanShots += 1;
   }
 
-  const maxAimX = COURT_DIM.SINGLES_HALF_WIDTH - 0.12;
-  let targetX = clamp(input.aimX, -1, 1) * maxAimX;
+  const clampedAimX = clamp(input.aimX, -1, 1);
+  let targetX = clampedAimX * (COURT_DIM.SINGLES_HALF_WIDTH - 0.14);
   let targetZ = 0;
-  let baseSpeed = 27.5;
-  let topspinMag = 52;
+  let baseSpeed = 28.0;
+  let topspinMag = 58;
   let minNetClear = 0.22;
   let peakHeightMinM: number | undefined;
 
   if (shotType === 'dropshot') {
-    // Target opponent front court Z in [1.8, 3.6] m
     const netAcc = computeNetAccuracyMultiplier(arch.net);
-    const depth = clamp(2.65 - forwardAimZ * 0.45 / netAcc, 1.95, 3.4);
+    const depth =
+      forwardAimZ >= 0.5 ? clamp(2.40 / netAcc, 2.15, 2.65) : 2.85;
     targetZ = targetSide * depth;
-    targetX = clamp(input.aimX, -1, 1) * (COURT_DIM.SINGLES_HALF_WIDTH - 0.35);
-    baseSpeed = 14.5;
-    topspinMag = -36;
+    targetX = clampedAimX * (COURT_DIM.SINGLES_HALF_WIDTH - 0.32);
+    baseSpeed = 14.8;
+    topspinMag = -42;
     minNetClear = 0.16;
   } else if (shotType === 'lob') {
-    targetZ = targetSide * 9.8;
-    targetX = clamp(input.aimX, -1, 1) * (COURT_DIM.SINGLES_HALF_WIDTH - 0.55);
-    baseSpeed = 19.5;
+    targetZ = targetSide * 10.1;
+    targetX = clampedAimX * (COURT_DIM.SINGLES_HALF_WIDTH - 0.50);
+    baseSpeed = 19.6;
     topspinMag = 24;
     minNetClear = 1.6;
-    peakHeightMinM = 5.65;
+    peakHeightMinM = 5.60;
   } else if (shotType === 'slice') {
-    targetZ = targetSide * clamp(8.6 + forwardAimZ * 2.0, 6.2, 11.1);
-    baseSpeed = 18.0;
-    topspinMag = -48;
-    minNetClear = 0.2;
+    targetZ = targetSide * 6.0;
+    targetX = clampedAimX * (COURT_DIM.SINGLES_HALF_WIDTH - 0.20);
+    baseSpeed = 18.8;
+    topspinMag = -50;
+    minNetClear = 0.20;
   } else {
     // topspin
-    targetZ = targetSide * clamp(9.5 + forwardAimZ * 1.9, 6.8, 11.45);
-    baseSpeed = 27.2;
-    topspinMag = 56;
+    targetZ = targetSide * clamp(9.8 + forwardAimZ * 1.55, 8.2, 11.45);
+    targetX = clampedAimX * (COURT_DIM.SINGLES_HALF_WIDTH - 0.14);
+    baseSpeed = 28.0;
+    topspinMag = 58;
     minNetClear = 0.22;
   }
 
   let speedMult = 1.0;
-  if (quality === 'PERFECT') {
-    speedMult = 1.16;
-    // Zero error beyond tiny 2cm jitter, guaranteeing <= 0.15m precision
-    targetX += rng.range(-0.02, 0.02);
-    targetZ += rng.range(-0.02, 0.02);
-  } else if (quality === 'GOOD') {
+  const scatter = computeControlScatterM(quality, arch.control);
+
+  if (quality === 'CLEAN') {
+    speedMult = 1.12;
+    targetX += rng.range(-scatter, scatter);
+    targetZ += rng.range(-scatter, scatter);
+  } else if (quality === 'SOLID') {
     speedMult = 1.0;
-    targetX += rng.range(-0.35, 0.35);
-    targetZ += rng.range(-0.35, 0.35);
-  } else if (quality === 'EARLY' || quality === 'LATE') {
-    speedMult = 0.78;
-    const nearSideline = Math.abs(targetX) > COURT_DIM.SINGLES_HALF_WIDTH - 0.38;
-    if (nearSideline && rng.next() < 0.2) {
-      // 20% chance of slight wide miss when aiming near sideline
-      targetX = Math.sign(targetX || 1) * (COURT_DIM.SINGLES_HALF_WIDTH + rng.range(0.06, 0.28));
+    targetX += rng.range(-scatter, scatter);
+    targetZ += rng.range(-scatter, scatter);
+    if (shotType === 'dropshot') {
+      targetZ = targetSide * clamp(Math.abs(targetZ), 1.85, 3.85);
     } else {
-      targetX += rng.range(-0.95, 0.95);
+      targetZ = targetSide * Math.max(1.8, Math.abs(targetZ));
     }
-    // Shallower depth on early/late
-    targetZ = targetSide * Math.max(2.2, Math.abs(targetZ) - rng.range(0.5, 1.35));
   } else {
-    // VERY_EARLY / VERY_LATE
-    speedMult = 0.62;
-    if (quality === 'VERY_EARLY') {
-      const pullSign = targetX !== 0 ? Math.sign(targetX) : rng.next() < 0.5 ? -1 : 1;
-      targetX = pullSign * (COURT_DIM.SINGLES_HALF_WIDTH + rng.range(0.45, 1.4));
-      targetZ += rng.range(-1.2, 1.2);
+    // STRETCH
+    speedMult = 0.80;
+    targetX += rng.range(-scatter, scatter);
+    targetZ += rng.range(-scatter, scatter);
+
+    if (shotType === 'dropshot') {
+      // V2: dropshot does NOT apply -1.1m pull; instead +0.35m deeper and clamped [2.0, 3.8]m
+      const stretchDropDepth = clamp(Math.abs(targetZ) + 0.35, 2.0, 3.8);
+      targetZ = targetSide * stretchDropDepth;
     } else {
-      // VERY_LATE: either long past baseline or low into net
-      targetX += rng.range(-1.2, 1.2);
-      targetZ = targetSide * (COURT_DIM.HALF_LENGTH + rng.range(0.55, 1.8));
+      // Mid/deep shots pull shallower by 1.1m, clamped >= 2.2m
+      targetZ = targetSide * Math.max(2.2, Math.abs(targetZ) - 1.1);
+    }
+
+    if (Math.abs(clampedAimX) > 0.75) {
+      const pErr = computeStretchSidelineErrorProb(arch.control);
+      if (rng.next() < pErr) {
+        const sign = clampedAimX >= 0 ? 1 : -1;
+        targetX = sign * (COURT_DIM.SINGLES_HALF_WIDTH + rng.range(0.10, 0.32));
+      } else {
+        targetX = clamp(
+          targetX,
+          -COURT_DIM.SINGLES_HALF_WIDTH + 0.08,
+          COURT_DIM.SINGLES_HALF_WIDTH - 0.08
+        );
+      }
     }
   }
 
@@ -599,11 +548,6 @@ function executeRallyShot(
     peakHeightMinM,
   });
 
-  if (quality === 'VERY_LATE' && rng.next() < 0.45) {
-    // Occasional net error on VERY_LATE
-    solved.vel.y -= 2.2;
-  }
-
   state.ball.pos = origin;
   state.ball.vel = solved.vel;
   state.ball.spin = spin;
@@ -618,13 +562,15 @@ function executeRallyShot(
   state.ball.lastShotQuality = quality;
   state.ball.predictedLanding = cloneVec3(solved.predictedLanding);
 
-  const physSpeed = Math.hypot(solved.vel.x, solved.vel.y, solved.vel.z);
-  state.ball.speedKmhDisplay = Math.round(clamp(physSpeed * 4.85, 65, 185));
+  const horizSpeed = Math.hypot(solved.vel.x, solved.vel.z);
+  state.ball.speedKmhDisplay = Math.round(clamp(horizSpeed * 4.85, 65, 185));
 
   hitter.anim = shotType === 'lob' ? 'lob' : targetX * hitter.side >= 0 ? 'forehand' : 'backhand';
   hitter.animTime = 0;
-  hitter.meter.active = false;
-  hitter.meter.lastQuality = quality;
+  hitter.stance.armedAction = 'none';
+  hitter.stance.holdDurationSec = 0;
+  hitter.stance.bufferRemainingSec = 0;
+  hitter.stance.lastQuality = quality;
 
   events.push({
     type: 'SHOT_HIT',
@@ -650,7 +596,6 @@ function finalizePoint(
 ): void {
   const loser = (1 - winner) as PlayerIndex;
 
-  // Update stats
   if (reason === 'ace') {
     state.stats[winner].aces += 1;
     state.stats[winner].winners += 1;
@@ -660,18 +605,6 @@ function finalizePoint(
     state.stats[loser].doubleFaults += 1;
   } else if (reason === 'unforced_error' || reason === 'out' || reason === 'net') {
     state.stats[loser].unforcedErrors += 1;
-  }
-
-  // Advance existing Takeover counters BEFORE awarding new end-of-point Takeover energy
-  advanceTakeoverOnPointEnd(state, events);
-
-  // Takeover energy adjustments
-  if (reason === 'ace' || reason === 'winner' || reason === 'double_bounce') {
-    addTakeoverEnergy(state.players[winner], 25, events);
-  } else if (reason === 'double_fault') {
-    addTakeoverEnergy(state.players[loser], -30, events);
-  } else if (reason === 'unforced_error' || reason === 'out' || reason === 'net') {
-    addTakeoverEnergy(state.players[loser], -25, events);
   }
 
   state.score = awardPointToScore(state.score, winner);
@@ -690,7 +623,6 @@ function finalizePoint(
     },
   });
 
-  // Trigger Hawkeye if close to line (<= 15 cm)
   if (hawkeyeCandidate && hawkeyeCandidate.distanceToLineCm <= COURT_DIM.HAWKEYE_THRESHOLD_M * 100) {
     state.hawkeye = {
       active: true,
@@ -768,8 +700,95 @@ function handleServeFault(state: MatchState, serverIdx: PlayerIndex, events: Gam
   finalizePoint(state, receiverIdx, 'double_fault', null, events);
 }
 
+function updatePlayerStanceBuffer(
+  p: PlayerState,
+  inp: PlayerInputFrame,
+  ball: BallState,
+  dt: number
+): void {
+  if (ball.lastHitter === p.index) {
+    p.stance.armedAction = 'none';
+    p.stance.holdDurationSec = 0;
+    p.stance.bufferRemainingSec = 0;
+    return;
+  }
+
+  if (ball.hitTick === p.stance.lastConsumedHitTick) {
+    return;
+  }
+
+  const wasHolding = p.stance.armedAction !== 'none' && p.stance.holdDurationSec > 0;
+
+  if (inp.action !== 'none') {
+    if (inp.actionPressed || p.stance.armedAction !== inp.action) {
+      p.stance.armedAction = inp.action;
+      p.stance.holdDurationSec = dt;
+    } else {
+      p.stance.holdDurationSec += dt;
+    }
+    p.stance.bufferRemainingSec = 0;
+    return;
+  }
+
+  // inp.action === 'none'
+  if (wasHolding) {
+    if (p.stance.holdDurationSec < PHYSICS_CONSTANTS.TAP_MAX_HOLD_SEC) {
+      p.stance.bufferRemainingSec = PHYSICS_CONSTANTS.PRE_INPUT_BUFFER_SEC;
+      p.stance.holdDurationSec = 0;
+    } else {
+      // Long hold (>= 0.20 s) released -> cancel immediately
+      p.stance.armedAction = 'none';
+      p.stance.holdDurationSec = 0;
+      p.stance.bufferRemainingSec = 0;
+    }
+    return;
+  }
+
+  if (p.stance.armedAction !== 'none' && p.stance.bufferRemainingSec > 0) {
+    p.stance.bufferRemainingSec = Math.max(0, p.stance.bufferRemainingSec - dt);
+    if (p.stance.bufferRemainingSec <= 0) {
+      p.stance.armedAction = 'none';
+    }
+    return;
+  }
+
+  p.stance.armedAction = 'none';
+  p.stance.holdDurationSec = 0;
+  p.stance.bufferRemainingSec = 0;
+}
+
+function predictNextPositions(
+  p: PlayerState,
+  ball: BallState,
+  dt: number,
+  courtId: MatchConfig['court']
+): { nextBallPos: Vec3; nextPlayerPos: Vec3 } {
+  const court = COURTS[courtId];
+  const subDt = dt / COURT_DIM.PHYSICS_SUBSTEPS;
+  let bPos = cloneVec3(ball.pos);
+  let bVel = cloneVec3(ball.vel);
+  let bSpin = cloneVec3(ball.spin);
+  for (let s = 0; s < COURT_DIM.PHYSICS_SUBSTEPS; s++) {
+    const out = stepBallSubstep(bPos, bVel, bSpin, subDt, court);
+    bPos = out.pos;
+    bVel = out.vel;
+    bSpin = out.spin;
+  }
+
+  const nextX = clamp(p.pos.x + p.vel.x * dt, -COURT_DIM.RUN_LIMIT_X, COURT_DIM.RUN_LIMIT_X);
+  const nextZ =
+    p.side === 1
+      ? clamp(p.pos.z + p.vel.z * dt, COURT_DIM.RUN_LIMIT_Z_MIN, COURT_DIM.RUN_LIMIT_Z_MAX)
+      : clamp(p.pos.z + p.vel.z * dt, -COURT_DIM.RUN_LIMIT_Z_MAX, -COURT_DIM.RUN_LIMIT_Z_MIN);
+
+  return {
+    nextBallPos: bPos,
+    nextPlayerPos: { x: nextX, y: p.pos.y, z: nextZ },
+  };
+}
+
 /**
- * Pure single-step match simulation advancing physics, rules, AI/player inputs, and pause/hawkeye timers.
+ * Pure single-step match simulation advancing physics, V2 auto-contact state machine, rules, and pause/hawkeye timers.
  */
 export function stepMatch(
   state: MatchState,
@@ -917,29 +936,20 @@ export function stepMatch(
   updatePlayerMovement(next, 0, inputs[0], dt);
   updatePlayerMovement(next, 1, inputs[1], dt);
 
-  // Serve ready phase
+  // Serve ready phase: Decision 1A edge-triggered one-button serve (L silently ignored)
   if (next.phase === 'serve_ready') {
     next.phaseTimer += dt;
     const srvIdx = next.score.server;
     const srv = next.players[srvIdx];
     const srvInput = inputs[srvIdx];
 
-    // Keep ball positioned with server
     next.ball.pos = { x: srv.pos.x, y: 1.05, z: srv.pos.z - srv.side * 0.35 };
 
-    // L (Lob) is silently ignored during serve_ready
-    if (srvInput.phase === 'hold' && (srvInput.action === 'J' || srvInput.action === 'K')) {
-      const shotType: ShotType = srvInput.action === 'J' ? 'serve_flat' : 'serve_kick';
-      const arch = ARCHETYPES[srv.archetype];
-      const { effectiveHalfWidth } = computeShotQuality(PHYSICS_CONSTANTS.METER_SWEET_CENTER, arch, {
-        shotType,
-        isTakeover: srv.takeoverPointsLeft > 0,
-        isSliding: false,
-      });
-      srv.meter.active = true;
-      srv.meter.action = srvInput.action;
-      srv.meter.progress = 0;
-      srv.meter.effectiveHalfWidth = effectiveHalfWidth;
+    if (srvInput.actionPressed && (srvInput.action === 'J' || srvInput.action === 'K')) {
+      srv.stance.armedAction = srvInput.action;
+      srv.stance.holdDurationSec = dt;
+      srv.stance.bufferRemainingSec = 0;
+      srv.stance.lockedAimX = clamp(srvInput.aimX, -1, 1);
       srv.anim = 'serve_toss';
       srv.animTime = 0;
       next.phase = 'serve_toss';
@@ -949,100 +959,120 @@ export function stepMatch(
     return { state: next, events };
   }
 
-  // Serve toss phase
+  // Serve toss phase: 0.32s auto toss, never canceled on release, update lockedAimX only if |aimX|>0.05
   if (next.phase === 'serve_toss') {
     next.phaseTimer += dt;
     const srvIdx = next.score.server;
     const srv = next.players[srvIdx];
     const srvInput = inputs[srvIdx];
 
-    // Animate ball toss arc
-    const tossT = Math.min(1, next.phaseTimer / 0.85);
+    const tossT = Math.min(1, next.phaseTimer / PHYSICS_CONSTANTS.SERVE_TOSS_DURATION_SEC);
     next.ball.pos = {
       x: srv.pos.x,
-      y: 1.05 + Math.sin(tossT * Math.PI) * 1.65,
+      y: 1.05 + Math.sin(tossT * Math.PI) * 1.45,
       z: srv.pos.z - srv.side * 0.28,
     };
 
-    srv.meter.progress += PHYSICS_CONSTANTS.METER_PROGRESS_RATE * dt;
-    const shotType: 'serve_flat' | 'serve_kick' =
-      srv.meter.action === 'J' ? 'serve_flat' : 'serve_kick';
-    const arch = ARCHETYPES[srv.archetype];
-    const evalRes = computeShotQuality(srv.meter.progress, arch, {
-      shotType,
-      isTakeover: srv.takeoverPointsLeft > 0,
-      isSliding: false,
-    });
-    srv.meter.effectiveHalfWidth = evalRes.effectiveHalfWidth;
+    if (Math.abs(srvInput.aimX) > 0.05) {
+      srv.stance.lockedAimX = clamp(srvInput.aimX, -1, 1);
+    }
 
-    if (srvInput.phase === 'release' || srv.meter.progress >= PHYSICS_CONSTANTS.METER_MAX_PROGRESS) {
-      executeServeLaunch(next, srvIdx, shotType, evalRes.quality, srvInput, rng, events);
+    if (next.phaseTimer >= PHYSICS_CONSTANTS.SERVE_TOSS_DURATION_SEC) {
+      const shotType: 'serve_flat' | 'serve_kick' =
+        srv.stance.armedAction === 'K' ? 'serve_kick' : 'serve_flat';
+      executeServeLaunch(
+        next,
+        srvIdx,
+        shotType,
+        srv.stance.lockedAimX,
+        srvInput.aimZ,
+        rng,
+        events
+      );
     }
 
     return { state: next, events };
   }
 
-  // Rally phase: check swing meters first
+  // Rally phase: V2 pre-arming/buffer state machine + auto best-contact hit detection
   for (const idx of [0, 1] as const) {
     const p = next.players[idx];
     const inp = inputs[idx];
-    const arch = ARCHETYPES[p.archetype];
+    updatePlayerStanceBuffer(p, inp, next.ball, dt);
 
-    if (!p.meter.active && inp.phase === 'hold' && inp.action !== 'none' && next.ball.lastHitter !== idx) {
-      const fwd = -clamp(inp.aimZ, -1, 1) * p.side;
-      const previewType: ShotType =
-        inp.action === 'L' ? 'lob' : inp.action === 'K' ? (fwd >= 0.5 ? 'dropshot' : 'slice') : 'topspin';
-      const { effectiveHalfWidth } = computeShotQuality(PHYSICS_CONSTANTS.METER_SWEET_CENTER, arch, {
-        shotType: previewType,
-        isTakeover: p.takeoverPointsLeft > 0,
-        isSliding: p.isSliding,
-      });
-      p.meter.active = true;
-      p.meter.action = inp.action;
-      p.meter.progress = 0;
-      p.meter.effectiveHalfWidth = effectiveHalfWidth;
-    } else if (p.meter.active) {
-      p.meter.progress += PHYSICS_CONSTANTS.METER_PROGRESS_RATE * dt;
+    // IRON RULE: never auto-swing when armedAction === 'none'
+    if (p.stance.armedAction === 'none') {
+      continue;
+    }
+
+    const canCheckContact =
+      next.ball.active &&
+      next.ball.lastHitter !== idx &&
+      next.ball.hitTick < next.tick &&
+      next.ball.hitTick !== p.stance.lastConsumedHitTick &&
+      next.ball.bounces <= 1 &&
+      next.ball.pos.z * p.side >= -0.05 &&
+      next.ball.vel.z * p.side > 0;
+
+    if (!canCheckContact) {
+      continue;
+    }
+
+    const reachRadius = p.isSliding
+      ? PHYSICS_CONSTANTS.SLIDE_REACH_RADIUS_M
+      : PHYSICS_CONSTANTS.BASE_REACH_RADIUS_M;
+    const dNow = Math.hypot(next.ball.pos.x - p.pos.x, next.ball.pos.z - p.pos.z);
+
+    if (dNow > reachRadius) {
+      continue;
+    }
+
+    const { nextBallPos, nextPlayerPos } = predictNextPositions(
+      p,
+      next.ball,
+      dt,
+      next.config.court
+    );
+    const dNext = Math.hypot(nextBallPos.x - nextPlayerPos.x, nextBallPos.z - nextPlayerPos.z);
+
+    const atNet = Math.abs(p.pos.z) < 6.0;
+    let heightOk = false;
+    if (atNet) {
+      heightOk = next.ball.pos.y <= 2.65;
+    } else if (next.ball.pos.y <= 2.35) {
+      if (next.ball.bounces === 0 && next.ball.pos.y > 1.95 && dNext <= reachRadius) {
+        heightOk = false;
+      } else {
+        heightOk = true;
+      }
+    }
+
+    if (!heightOk) {
+      continue;
+    }
+
+    const closestApproach = dNext >= dNow - 0.01;
+    const coreSweetSpot =
+      dNow <= 0.72 && next.ball.pos.y <= 1.75 && (next.ball.bounces === 1 || atNet);
+    const antiMissFallback =
+      dNext > reachRadius ||
+      (next.ball.bounces === 1 && next.ball.pos.y <= 0.35 && next.ball.vel.y < 0);
+
+    if (closestApproach || coreSweetSpot || antiMissFallback) {
       const fwd = -clamp(inp.aimZ, -1, 1) * p.side;
       const shotType: 'topspin' | 'slice' | 'dropshot' | 'lob' =
-        p.meter.action === 'L'
+        p.stance.armedAction === 'L'
           ? 'lob'
-          : p.meter.action === 'K'
-            ? fwd >= 0.5
-              ? 'dropshot'
-              : 'slice'
+          : p.stance.armedAction === 'K'
+            ? fwd <= -0.5
+              ? 'slice'
+              : 'dropshot'
             : 'topspin';
-      const evalRes = computeShotQuality(p.meter.progress, arch, {
-        shotType,
-        isTakeover: p.takeoverPointsLeft > 0,
-        isSliding: p.isSliding,
-      });
-      p.meter.effectiveHalfWidth = evalRes.effectiveHalfWidth;
 
-      const released =
-        inp.phase === 'release' || p.meter.progress >= PHYSICS_CONSTANTS.METER_MAX_PROGRESS;
-      if (released) {
-        const reachRadius = p.isSliding
-          ? PHYSICS_CONSTANTS.SLIDE_REACH_RADIUS_M
-          : PHYSICS_CONSTANTS.BASE_REACH_RADIUS_M;
-        const distXZ = Math.hypot(next.ball.pos.x - p.pos.x, next.ball.pos.z - p.pos.z);
-        const canHit =
-          next.ball.active &&
-          next.ball.lastHitter !== idx &&
-          next.ball.bounces <= 1 &&
-          distXZ <= reachRadius &&
-          next.ball.pos.y <= 3.35 &&
-          next.ball.pos.z * p.side > -0.5;
-
-        if (canHit) {
-          executeRallyShot(next, idx, shotType, evalRes.quality, inp, rng, events);
-        } else {
-          // Whiff / swung early out of range
-          p.meter.active = false;
-          p.meter.progress = 0;
-          p.meter.lastQuality = evalRes.quality;
-        }
-      }
+      const arch = ARCHETYPES[p.archetype];
+      const { quality } = computePositionShotQuality(dNow, arch, p.isSliding);
+      p.stance.lastConsumedHitTick = next.ball.hitTick;
+      executeRallyShot(next, idx, shotType, quality, inp, rng, events);
     }
   }
 
@@ -1104,10 +1134,10 @@ export function stepMatch(
           });
 
           if (isServeBall && next.ball.touchedNet && judgment.inBounds) {
-            // Serve LET: replay serve without fault and rollback serve meter/1st-serve attempt stats
-            next.stats[hitter].totalMeterShots = Math.max(0, next.stats[hitter].totalMeterShots - 1);
-            if (next.ball.lastShotQuality === 'PERFECT') {
-              next.stats[hitter].perfectShots = Math.max(0, next.stats[hitter].perfectShots - 1);
+            // Serve LET: replay serve without fault and rollback serve shots/cleanShots/1st-serve stats
+            next.stats[hitter].totalShots = Math.max(0, next.stats[hitter].totalShots - 1);
+            if (next.ball.lastShotQuality === 'CLEAN') {
+              next.stats[hitter].cleanShots = Math.max(0, next.stats[hitter].cleanShots - 1);
             }
             if (next.score.serveNumber === 1) {
               next.stats[hitter].firstServesTotal = Math.max(
@@ -1164,7 +1194,7 @@ export function stepMatch(
       }
     }
 
-    // Safety out-of-arena bounds check (e.g. fast baseline winner exiting |z|>22 before 2nd bounce)
+    // Safety out-of-arena bounds check
     if (Math.abs(next.ball.pos.z) > 22 || Math.abs(next.ball.pos.x) > 14) {
       if (next.ball.bounces === 0) {
         if (isServeBall) {
@@ -1205,7 +1235,6 @@ export function launchHawkeyeTestBall(
 
   const distM = Math.max(0, opts.distCm / 100);
   const rMark = COURT_DIM.BALL_RADIUS;
-  // For out-of-bounds test calls smaller than ball radius, ensure center clears R_mark
   const outOffsetM = opts.inBounds ? -distM : Math.max(distM, rMark + 0.005);
 
   let targetX = 0;
@@ -1230,10 +1259,9 @@ export function launchHawkeyeTestBall(
     minNetClearanceM: 0.25,
   });
 
-  // Move receiver out of the way so the ball bounces cleanly without being returned
   const receiverIdx = (1 - hitterIdx) as PlayerIndex;
   next.players[receiverIdx].pos = { x: -4.5, y: 0, z: targetSide * 12.5 };
-  next.players[receiverIdx].meter.active = false;
+  next.players[receiverIdx].stance = createDefaultStance();
 
   next.phase = 'rally';
   next.phaseTimer = 0;
@@ -1249,8 +1277,70 @@ export function launchHawkeyeTestBall(
     firstBounceInBounds: null,
     lastHitter: hitterIdx,
     lastShotType: 'topspin',
-    lastShotQuality: 'PERFECT',
+    lastShotQuality: 'CLEAN',
     speedKmhDisplay: 142,
+    predictedLanding: cloneVec3(solved.predictedLanding),
+  };
+
+  return next;
+}
+
+/**
+ * Controlled test helper: launch an incoming topspin ball toward (targetX, targetZ) for receiver player.
+ */
+export function spawnIncomingTestBall(
+  state: MatchState,
+  opts: SpawnIncomingBallOptions,
+  rng: PRNG
+): MatchState {
+  void rng;
+  const next = cloneMatchState(state);
+  const receiverIdx: PlayerIndex = opts.forPlayerIndex ?? 0;
+  const senderIdx: PlayerIndex = (1 - receiverIdx) as PlayerIndex;
+  const senderSide = next.players[senderIdx].side;
+  const speedXZ = opts.speedXZ ?? 21;
+
+  const origin: Vec3 = { x: 0, y: 1.05, z: senderSide * 11.0 };
+  const target: Vec3 = {
+    x: opts.targetX,
+    y: COURT_DIM.BALL_RADIUS,
+    z: opts.targetZ,
+  };
+  const spin = makeTopspinVec(target.x - origin.x, target.z - origin.z, 36);
+
+  const solved = solveBallisticShot({
+    origin,
+    target,
+    desiredSpeedXZ: speedXZ,
+    spin,
+    minNetClearanceM: 0.22,
+  });
+
+  // Move sender out of play and reset stances
+  next.players[senderIdx].pos = { x: -5.5, y: 0, z: senderSide * 13.0 };
+  next.players[senderIdx].vel = { x: 0, y: 0, z: 0 };
+  next.players[senderIdx].stance = createDefaultStance();
+
+  next.players[receiverIdx].stance = createDefaultStance();
+
+  next.phase = 'rally';
+  next.phaseTimer = 0;
+
+  const physSpeed = Math.hypot(solved.vel.x, solved.vel.y, solved.vel.z);
+  next.ball = {
+    pos: origin,
+    vel: solved.vel,
+    spin,
+    active: true,
+    bounces: 0,
+    touchedNet: false,
+    hitTick: next.tick,
+    firstBouncePos: null,
+    firstBounceInBounds: null,
+    lastHitter: senderIdx,
+    lastShotType: 'topspin',
+    lastShotQuality: 'CLEAN',
+    speedKmhDisplay: Math.round(clamp(physSpeed * 4.85, 65, 185)),
     predictedLanding: cloneVec3(solved.predictedLanding),
   };
 

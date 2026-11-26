@@ -18,13 +18,13 @@ export function cloneMatchState(state: MatchState): MatchState {
         ...state.players[0],
         pos: cloneVec3(state.players[0].pos),
         vel: cloneVec3(state.players[0].vel),
-        meter: { ...state.players[0].meter },
+        stance: { ...state.players[0].stance },
       },
       {
         ...state.players[1],
         pos: cloneVec3(state.players[1].pos),
         vel: cloneVec3(state.players[1].vel),
-        meter: { ...state.players[1].meter },
+        stance: { ...state.players[1].stance },
       },
     ],
     ball: {
@@ -89,6 +89,7 @@ export function toLocalView(state: MatchState, side: PlayerSide): MatchState {
     player.pos = toLocalVec3(player.pos, side);
     player.vel = toLocalVec3(player.vel, side);
     player.yaw = normalizeYaw(player.yaw + Math.PI);
+    player.stance.lockedAimX = player.stance.lockedAimX === 0 ? 0 : -player.stance.lockedAimX;
   }
 
   copy.ball.pos = toLocalVec3(copy.ball.pos, side);
