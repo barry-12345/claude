@@ -18,10 +18,10 @@
 & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python tennis-2k/assets/source/generate_player_avatar.py -- --output tennis-2k/client/public/assets/models/tennis_player.glb
 
 # 3) 离线校验 glTF 二进制契约（21 骨 / 6 节点 / 10 材质 / 8 动画 / 0 scale 轨道 / 包体与面数 / 朝向与尺寸）
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python tennis-2k/assets/source/verify_glb.py
+python tennis-2k/assets/source/verify_glb.py tennis-2k/client/public/assets/models/tennis_player.glb --json tennis-2k/docs/review/wp-asset/evidence/v2-round-2/verify_glb.json
 
-# 4) 渲染 6 张明亮日光摄影棚预览图至 docs/review/wp-asset/evidence/v2-round-1/
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python tennis-2k/assets/source/render_previews.py
+# 4) 渲染 8 张明亮日光摄影棚预览图至 docs/review/wp-asset/evidence/v2-round-2/
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python tennis-2k/assets/source/render_previews.py -- tennis-2k/client/public/assets/models/tennis_player.glb tennis-2k/docs/review/wp-asset/evidence/v2-round-2
 ```
 
 ---

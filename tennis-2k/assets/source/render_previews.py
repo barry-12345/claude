@@ -1,8 +1,9 @@
-"""Blender 5.2 EEVEE studio preview renderer for exported tennis_player.glb.
+"""Blender 5.2 EEVEE studio preview renderer for exported tennis_player.glb (V2 Round 2).
 
-Imports the actual exported .glb back into Blender to verify visual fidelity
-and saves bright daylight studio renders under:
-  tennis-2k/docs/review/wp-asset/evidence/v2-round-1/
+Imports the actual exported .glb back into Blender and renders comprehensive
+multi-angle, headgear-closeup, shoe/shorts-closeup, all-clip action stress,
+and 4-archetype lineup evidence under:
+  tennis-2k/docs/review/wp-asset/evidence/v2-round-2/
 
 Usage:
   blender --background --python tennis-2k/assets/source/render_previews.py
@@ -20,7 +21,7 @@ from mathutils import Vector
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_GLB = REPO_ROOT / "client" / "public" / "assets" / "models" / "tennis_player.glb"
-EVIDENCE_DIR = REPO_ROOT / "docs" / "review" / "wp-asset" / "evidence" / "v2-round-1"
+EVIDENCE_DIR = REPO_ROOT / "docs" / "review" / "wp-asset" / "evidence" / "v2-round-2"
 
 
 def srgb_to_linear(hex_color: str) -> Tuple[float, float, float, float]:
@@ -33,6 +34,12 @@ def srgb_to_linear(hex_color: str) -> Tuple[float, float, float, float]:
     return (conv(r), conv(g), conv(b), 1.0)
 
 
+def look_at(obj: bpy.types.Object, target: Vector) -> None:
+    direction = target - obj.location
+    rot_quat = direction.to_track_quat("-Z", "Y")
+    obj.rotation_euler = rot_quat.to_euler()
+
+
 def setup_daylight_studio() -> None:
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
@@ -41,7 +48,7 @@ def setup_daylight_studio() -> None:
     scene.render.resolution_percentage = 100
     scene.view_settings.view_transform = "AgX"
     scene.view_settings.look = "AgX - Medium High Contrast"
-    scene.view_settings.exposure = -0.25
+    scene.view_settings.exposure = -0.22
 
     world = bpy.data.worlds.new("DaylightStudio")
     scene.world = world
@@ -51,7 +58,7 @@ def setup_daylight_studio() -> None:
         bg.inputs["Color"].default_value = srgb_to_linear("#DBEAFE")
         bg.inputs["Strength"].default_value = 0.95
 
-    bpy.ops.mesh.primitive_plane_add(size=22.0, location=(0.0, 0.0, 0.0))
+    bpy.ops.mesh.primitive_plane_add(size=24.0, location=(0.0, 0.0, 0.0))
     ground = bpy.context.active_object
     ground.name = "StudioGround"
     gmat = bpy.data.materials.new("StudioGroundMat")
@@ -88,12 +95,6 @@ def setup_daylight_studio() -> None:
     look_at(rim_obj, Vector((0.0, 0.0, 1.1)))
 
 
-def look_at(obj: bpy.types.Object, target: Vector) -> None:
-    direction = target - obj.location
-    rot_quat = direction.to_track_quat("-Z", "Y")
-    obj.rotation_euler = rot_quat.to_euler()
-
-
 def ensure_camera(loc: Tuple[float, float, float], target: Tuple[float, float, float], lens: float = 52.0) -> bpy.types.Object:
     cam = bpy.data.objects.get("PreviewCam")
     if cam is None:
@@ -107,7 +108,7 @@ def ensure_camera(loc: Tuple[float, float, float], target: Tuple[float, float, f
     return cam
 
 
-def import_avatar(offset_x: float = 0.0) -> Tuple[bpy.types.Object, Dict[str, bpy.types.Object]]:
+def import_avatar(offset_x: float = 0.0, rot_z_deg: float = 0.0) -> Tuple[bpy.types.Object, Dict[str, bpy.types.Object]]:
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=str(DEFAULT_GLB))
     new_objs = [o for o in bpy.data.objects if o not in before]
@@ -120,6 +121,8 @@ def import_avatar(offset_x: float = 0.0) -> Tuple[bpy.types.Object, Dict[str, bp
             arm = o
     if arm:
         arm.location.x += offset_x
+        if rot_z_deg != 0.0:
+            arm.rotation_euler.z += math.radians(rot_z_deg)
     return arm, by_name
 
 
@@ -141,7 +144,7 @@ def configure_archetype(by_name: Dict[str, bpy.types.Object], arm: bpy.types.Obj
             "accent": "#FFFFFF",
             "shorts": "#1E293B",
             "hair": "#2B211D",
-            "skin": "#E4A885",
+            "skin": "#E7AF8C",
             "headgear": "none",
             "wristbands": True,
             "shoulder": 1.00,
@@ -213,18 +216,19 @@ def configure_archetype(by_name: Dict[str, bpy.types.Object], arm: bpy.types.Obj
         pb.scale = Vector((cfg["shoulder"], 1.0, cfg["z_scale"]))
 
 
-def play_clip_at(arm: bpy.types.Object, clip_name: str, frame: int) -> None:
-    """Assign NLA strip's action directly to arm.animation_data.action for exact frame preview."""
+def align_clip_at_frame(arm: bpy.types.Object, clip_name: str, frac: float, target_frame: int) -> None:
     if not arm or not arm.animation_data:
         return
+    arm.animation_data.action = None
     for tr in arm.animation_data.nla_tracks:
-        tr.mute = True
         if tr.name == clip_name and tr.strips:
-            arm.animation_data.action = tr.strips[0].action
-            if tr.strips[0].action_slot:
-                arm.animation_data.action_slot = tr.strips[0].action_slot
-            break
-    bpy.context.scene.frame_set(frame)
+            tr.mute = False
+            st = tr.strips[0]
+            dur = max(1.0, st.frame_end - st.frame_start)
+            st.frame_start = target_frame - dur * frac
+            st.frame_end = st.frame_start + dur
+        else:
+            tr.mute = True
 
 
 def render_to(filename: str) -> None:
@@ -236,15 +240,15 @@ def render_to(filename: str) -> None:
 
 def main() -> None:
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-    bpy.context.scene.render.fps = 100
 
-    # Pass 1: Single-character studio shots (front, back, 3/4 face/upper, shoes)
+    # Pass 1: Front & Back Idle + 3/4 Face Closeup + Shoes/Shorts Closeup
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.render.fps = 100
     setup_daylight_studio()
     arm, by_name = import_avatar(0.0)
     configure_archetype(by_name, arm, "allcourt")
-    play_clip_at(arm, "idle", 1)
+    align_clip_at_frame(arm, "idle", 0.0, 1)
+    bpy.context.scene.frame_set(1)
 
     ensure_camera((0.0, 3.65, 1.02), (0.0, 0.0, 0.88), lens=50.0)
     render_to("01_front_full.png")
@@ -252,56 +256,69 @@ def main() -> None:
     ensure_camera((0.0, -3.65, 1.02), (0.0, 0.0, 0.88), lens=50.0)
     render_to("02_back_full.png")
 
-    ensure_camera((0.95, 1.48, 1.52), (0.02, 0.02, 1.38), lens=62.0)
+    ensure_camera((0.92, 1.42, 1.50), (0.0, 0.02, 1.38), lens=65.0)
     render_to("03_closeup_face_upper.png")
 
-    ensure_camera((0.88, 1.18, 0.34), (0.0, 0.05, 0.20), lens=58.0)
-    render_to("04_closeup_shoes.png")
+    ensure_camera((0.95, 1.55, 0.44), (0.0, 0.04, 0.36), lens=56.0)
+    render_to("04_closeup_shoes_shorts.png")
 
-    # Pass 2: Action poses (forehand contact + serve_toss trophy pose at exact peak frames)
+    # Pass 2: Headgear 3/4 Closeups (Visor + CapBackwards + Headband side-by-side)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.render.fps = 100
     setup_daylight_studio()
-    arm_fh, map_fh = import_avatar(-0.85)
-    configure_archetype(map_fh, arm_fh, "power")
-    arm_st, map_st = import_avatar(0.85)
+    for arch_id, ox, rdeg in [("defender", -0.58, 28.0), ("serve_volley", 0.0, -24.0), ("power", 0.58, 22.0)]:
+        a, m = import_avatar(ox, rot_z_deg=rdeg)
+        configure_archetype(m, a, arch_id)
+        align_clip_at_frame(a, "idle", 0.0, 1)
+    bpy.context.scene.frame_set(1)
+    ensure_camera((0.0, 1.95, 1.58), (0.0, 0.0, 1.50), lens=62.0)
+    render_to("05_headgear_34_closeups.png")
+
+    # Pass 3: Serve Toss + Forehand Contact
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.context.scene.render.fps = 100
+    setup_daylight_studio()
+    arm_st, map_st = import_avatar(-0.82)
     configure_archetype(map_st, arm_st, "serve_volley")
+    align_clip_at_frame(arm_st, "serve_toss", 0.98, 20)
 
-    # Clear active action, mute other NLA tracks, and align peak frames to scene frame 20
-    for a_obj, cname, frac in [(arm_fh, "forehand", 0.555), (arm_st, "serve_toss", 0.98)]:
-        a_obj.animation_data.action = None
-        for tr in a_obj.animation_data.nla_tracks:
-            if tr.name == cname and tr.strips:
-                tr.mute = False
-                st = tr.strips[0]
-                dur = max(1.0, st.frame_end - st.frame_start)
-                st.frame_start = 20.0 - dur * frac
-                st.frame_end = st.frame_start + dur
-            else:
-                tr.mute = True
+    arm_fh, map_fh = import_avatar(0.82)
+    configure_archetype(map_fh, arm_fh, "power")
+    align_clip_at_frame(arm_fh, "forehand", 0.555, 20)
+
     bpy.context.scene.frame_set(20)
-    ensure_camera((0.40, 4.25, 1.15), (0.0, 0.0, 0.96), lens=45.0)
-    render_to("05_action_forehand_and_serve.png")
+    ensure_camera((0.30, 4.15, 1.15), (0.0, 0.0, 0.96), lens=46.0)
+    render_to("06_action_serve_and_forehand.png")
 
-    # Pass 3: All 4 Archetypes Lineup
+    # Pass 4: Celebrate + Backhand + Run + Slide Stress Lineup (verify zero armpit spikes & zero clipping!)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.render.fps = 100
     setup_daylight_studio()
-    lineup = [
-        ("power", -1.55),
-        ("allcourt", -0.52),
-        ("serve_volley", 0.52),
-        ("defender", 1.55),
+    clips_lineup = [
+        ("power", "celebrate", 0.25, -1.65),
+        ("allcourt", "backhand", 0.56, -0.55),
+        ("serve_volley", "run", 0.0, 0.55),
+        ("defender", "slide", 0.50, 1.65),
     ]
-    for arch_id, ox in lineup:
+    for arch_id, cname, frac, ox in clips_lineup:
         a, m = import_avatar(ox)
         configure_archetype(m, a, arch_id)
-        a.animation_data.action = None
-        for tr in a.animation_data.nla_tracks:
-            tr.mute = tr.name != "idle"
+        align_clip_at_frame(a, cname, frac, 20)
+    bpy.context.scene.frame_set(20)
+    ensure_camera((0.0, 6.20, 1.15), (0.0, 0.0, 0.92), lens=45.0)
+    render_to("07_action_celebrate_backhand_run_slide.png")
+
+    # Pass 5: All 4 Archetypes Idle Lineup
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.context.scene.render.fps = 100
+    setup_daylight_studio()
+    for arch_id, ox in [("defender", -1.62), ("serve_volley", -0.54), ("allcourt", 0.54), ("power", 1.62)]:
+        a, m = import_avatar(ox)
+        configure_archetype(m, a, arch_id)
+        align_clip_at_frame(a, "idle", 0.0, 1)
     bpy.context.scene.frame_set(1)
-    ensure_camera((0.0, 5.95, 1.08), (0.0, 0.0, 0.88), lens=45.0)
-    render_to("06_archetypes_lineup.png")
+    ensure_camera((0.0, 6.60, 1.08), (0.0, 0.0, 0.88), lens=45.0)
+    render_to("08_archetypes_lineup.png")
 
 
 if __name__ == "__main__":
