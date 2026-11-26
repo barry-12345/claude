@@ -17,13 +17,14 @@ export interface HudCallbacks {
   onExitToLobby: () => void;
 }
 
-const KEY_POINT_LABELS: Record<KeyPointLabel, string> = {
+export const KEY_POINT_LABELS: Record<KeyPointLabel, string> = {
   NONE: '',
   BREAK_POINT: 'BREAK POINT · 破发点',
   DECIDING_POINT: 'DECIDING POINT · 金球决胜',
   SET_POINT: 'SET POINT · 盘点',
   MATCH_POINT: 'MATCH POINT · 赛点',
   TIEBREAK: 'TIEBREAK · 抢七局',
+  SUPER_TIEBREAK: 'SUPER TIEBREAK · 超级抢十',
 };
 
 const LINE_LABELS: Record<string, string> = {
@@ -154,15 +155,13 @@ export class HudView {
   public handleEventCallout(ev: GameEvent, localIdx: PlayerIndex): void {
     if (ev.type === 'SHOT_HIT') {
       const cls =
-        ev.quality === 'PERFECT'
+        ev.quality === 'CLEAN'
           ? 'perfect'
-          : ev.quality === 'GOOD'
-            ? ''
-            : ev.quality.includes('VERY')
-              ? 'bad'
-              : 'warn';
+          : ev.quality === 'STRETCH'
+            ? 'warn'
+            : '';
       const who = ev.hitter === localIdx ? '' : '对手 ';
-      this.showCallout(`${who}${ev.quality} · ${ev.speedKmh} km/h`, cls, 1100);
+      this.showCallout(`${who}${ev.quality} · ${ev.speedKmh} km/h`, cls, 1000);
     } else if (ev.type === 'NET_LET') {
       this.showCallout(ev.isServe ? 'NET LET · 重发一球' : 'NET CORD · 擦网过网', 'warn', 1100);
     } else if (ev.type === 'POINT_SCORED') {
@@ -177,12 +176,6 @@ export class HudView {
       };
       const isWin = ev.winner === localIdx;
       this.showCallout(reasonMap[ev.reason] ?? '得分', isWin ? 'perfect' : 'bad', 1300);
-    } else if (ev.type === 'TAKEOVER_ON') {
-      this.showCallout(
-        ev.player === localIdx ? '🔥 TAKEOVER 激活! 甜区 1.25×' : '⚡ 对手激活 TAKEOVER!',
-        'warn',
-        1400
-      );
     }
   }
 
@@ -261,51 +254,26 @@ export class HudView {
       }
     }
 
-    // 4. Bottom Takeover Bars
-    const lpE = Math.round(lp.takeoverEnergy);
-    const opE = Math.round(op.takeoverEnergy);
-    const bottomKey = `${lpE}:${lp.takeoverPointsLeft}:${lp.takeoverCooldown}:${opE}:${op.takeoverPointsLeft}:${op.takeoverCooldown}`;
+    // 4. Clean V2 Bottom Controls Hint (no Takeover bars)
+    const bottomKey = `v2:${lp.stance.armedAction}`;
     if (bottomKey !== this.lastBottomKey) {
       this.lastBottomKey = bottomKey;
+      const armedBadge =
+        lp.stance.armedAction === 'J'
+          ? '<span class="armed-pill armed-j">预选 J 强攻</span>'
+          : lp.stance.armedAction === 'K'
+            ? '<span class="armed-pill armed-k">预选 K 小球/削球</span>'
+            : lp.stance.armedAction === 'L'
+              ? '<span class="armed-pill armed-l">预选 L 挑高</span>'
+              : '';
       this.bottomWrapEl.innerHTML = `
-        <div class="takeover-card ${lp.takeoverPointsLeft > 0 ? 'active' : ''}">
-          <div class="takeover-head">
-            <span>🔥 你的 TAKEOVER</span>
-            <span>${
-              lp.takeoverPointsLeft > 0
-                ? `激活中 (${lp.takeoverPointsLeft}分)`
-                : lp.takeoverCooldown
-                  ? '冷却中'
-                  : `${lpE}%`
-            }</span>
-          </div>
-          <div class="takeover-track">
-            <div class="takeover-fill" style="width:${lp.takeoverPointsLeft > 0 ? 100 : lpE}%"></div>
-          </div>
-        </div>
-
         <div class="controls-mini">
-          <span class="kbd">WASD</span> 移动/瞄准 ·
-          <span class="kbd">J</span> 主攻/一发 ·
-          <span class="kbd">K</span> 切削/二发 ·
-          <span class="kbd">W+K</span> 小球 ·
-          <span class="kbd">L</span> 挑高
-        </div>
-
-        <div class="takeover-card ${op.takeoverPointsLeft > 0 ? 'active' : ''}">
-          <div class="takeover-head">
-            <span>对手 TAKEOVER</span>
-            <span>${
-              op.takeoverPointsLeft > 0
-                ? `激活中 (${op.takeoverPointsLeft}分)`
-                : op.takeoverCooldown
-                  ? '冷却中'
-                  : `${opE}%`
-            }</span>
-          </div>
-          <div class="takeover-track">
-            <div class="takeover-fill" style="width:${op.takeoverPointsLeft > 0 ? 100 : opE}%"></div>
-          </div>
+          ${armedBadge}
+          <span class="kbd">WASD/方向键</span> 走位+左右 ·
+          <span class="kbd">J</span> 打后强攻 ·
+          <span class="kbd">K</span> 打前小球/削球 ·
+          <span class="kbd">L</span> 挑高 ·
+          不按键放球
         </div>
       `;
     }
@@ -465,7 +433,7 @@ export class HudView {
           <div style="text-align:center;font-size:14px;color:var(--gold);font-weight:700;">${forfeitNotice}</div>
           <table class="stats-table">
             <thead>
-              <tr><th>你</th><th>2K 赛后统计</th><th>${isOnline ? '对手' : 'AI'}</th></tr>
+              <tr><th>你</th><th>赛后统计</th><th>${isOnline ? '对手' : 'AI'}</th></tr>
             </thead>
             <tbody>
               <tr><td>${sMy.aces}</td><td>Ace 发球直接得分</td><td>${sOpp.aces}</td></tr>
@@ -473,7 +441,7 @@ export class HudView {
               <tr><td>${mySum.firstServePct}%</td><td>一发成功率</td><td>${oppSum.firstServePct}%</td></tr>
               <tr><td>${sMy.winners}</td><td>制胜分 (Winners)</td><td>${sOpp.winners}</td></tr>
               <tr><td>${sMy.unforcedErrors}</td><td>非受迫失误 (UE)</td><td>${sOpp.unforcedErrors}</td></tr>
-              <tr><td>${mySum.perfectPct}%</td><td>Perfect 绿条率</td><td>${oppSum.perfectPct}%</td></tr>
+              <tr><td>${mySum.cleanPct}%</td><td>CLEAN 甜点率</td><td>${oppSum.cleanPct}%</td></tr>
             </tbody>
           </table>
           <div class="modal-actions">

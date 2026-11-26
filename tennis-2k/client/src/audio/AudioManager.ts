@@ -40,17 +40,18 @@ export class AudioManager {
     const now = ctx.currentTime;
     const isServe = shotType === 'serve_flat' || shotType === 'serve_kick';
     const isSlice = shotType === 'slice' || shotType === 'dropshot';
+    const isStretch = quality === 'STRETCH';
 
     // Core racquet thump
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = isSlice ? 'triangle' : 'sine';
-    const startFreq = isServe ? 260 : isSlice ? 190 : 220;
-    const endFreq = isServe ? 75 : 85;
+    const startFreq = isServe ? 260 : isSlice ? 190 : isStretch ? 175 : 225;
+    const endFreq = isServe ? 75 : isStretch ? 68 : 85;
     osc.frequency.setValueAtTime(startFreq, now);
     osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.085);
 
-    const vol = isServe ? 0.42 : isSlice ? 0.26 : 0.34;
+    const vol = (isServe ? 0.42 : isSlice ? 0.26 : 0.34) * (isStretch ? 0.78 : 1.0);
     gain.gain.setValueAtTime(vol, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
 
@@ -63,22 +64,22 @@ export class AudioManager {
     this.playNoiseBurst(
       isSlice ? 2600 : court === 'hard' ? 1900 : 1450,
       isServe ? 0.08 : 0.055,
-      isSlice ? 0.14 : 0.22
+      (isSlice ? 0.14 : 0.22) * (isStretch ? 0.72 : 1.0)
     );
 
-    // 2K Perfect green sweet-spot chime
-    if (quality === 'PERFECT') {
+    // CLEAN sweet-spot chime
+    if (quality === 'CLEAN') {
       const chime = ctx.createOscillator();
       const chimeGain = ctx.createGain();
       chime.type = 'triangle';
-      chime.frequency.setValueAtTime(660, now);
-      chime.frequency.exponentialRampToValueAtTime(990, now + 0.14);
-      chimeGain.gain.setValueAtTime(0.22, now);
-      chimeGain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+      chime.frequency.setValueAtTime(680, now);
+      chime.frequency.exponentialRampToValueAtTime(1020, now + 0.13);
+      chimeGain.gain.setValueAtTime(0.2, now);
+      chimeGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
       chime.connect(chimeGain);
       chimeGain.connect(this.masterGain);
       chime.start(now);
-      chime.stop(now + 0.2);
+      chime.stop(now + 0.19);
     }
   }
 
@@ -167,23 +168,6 @@ export class AudioManager {
         osc.stop(now + idx * 0.09 + 0.22);
       });
     }
-  }
-
-  public playTakeover(active: boolean): void {
-    const ctx = this.ensureReady();
-    if (!ctx || !this.masterGain) return;
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(active ? 330 : 520, now);
-    osc.frequency.exponentialRampToValueAtTime(active ? 784 : 220, now + 0.28);
-    g.gain.setValueAtTime(0.15, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
-    osc.connect(g);
-    g.connect(this.masterGain);
-    osc.start(now);
-    osc.stop(now + 0.34);
   }
 
   public playCountdownTick(finalTick: boolean): void {

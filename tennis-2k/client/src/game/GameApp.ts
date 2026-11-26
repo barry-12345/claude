@@ -7,31 +7,30 @@ import {
   createRng,
   fastForwardPauseState,
   launchHawkeyeTestBall,
-  PHYSICS_CONSTANTS,
   requestManualPause,
   requestManualResume,
+  spawnIncomingTestBall,
   stepMatch,
   toLocalEvent,
   toLocalView,
   type AIDifficulty,
   type ArchetypeId,
-  type CourtId,
   type ErrorCode,
   type GameEvent,
-  type MatchFormat,
   type MatchState,
   type PlayerIndex,
   type PlayerSide,
   type PRNG,
   type ScorePatch,
   type ServerMessage,
+  type SpawnIncomingBallOptions,
   type TestStateSnapshot,
 } from '@court2k/shared';
 import type { Court2KTestHook } from '../contracts.js';
 import { AudioManager } from '../audio/AudioManager.js';
 import { PerfManager } from '../core/PerfManager.js';
 import { InputController } from '../input/InputController.js';
-import { applyOnlineMatchOver } from '../net/onlineSync.js';
+import { applyOnlineMatchOver, resolveFullSyncTransition } from '../net/onlineSync.js';
 import { SnapshotBuffer } from '../net/SnapshotBuffer.js';
 import { WsClient } from '../net/WsClient.js';
 import { CourtScene } from '../render/CourtScene.js';
@@ -424,13 +423,26 @@ export class GameApp {
         break;
       }
       case 'FULL_SYNC': {
-        this.mode = 'online';
+        this.lobbyState.tab = 'online';
         this.lobbyState.onlineRoomCode = msg.payload.roomCode;
+        this.lobbyState.onlinePlayerIndex = msg.payload.playerIndex;
+        this.lobbyState.onlineConfig = msg.payload.snapshot.config;
         this.yourSide = msg.payload.yourSide;
         this.playerIndex = msg.payload.playerIndex;
-        this.onlineState = msg.payload.snapshot;
-        this.snapshots.reset(msg.payload.snapshot);
         this.rematchRequested = [false, false];
+
+        const resolution = resolveFullSyncTransition(msg.payload, this.snapshots);
+        this.mode = resolution.mode;
+        this.onlineState = resolution.onlineState;
+
+        if (resolution.kind === 'lobby_waiting') {
+          this.input.setCaptureActive(false);
+          this.input.resetAndRebind('FULL_SYNC_WAITING');
+          this.hudView.setMatchVisible(false);
+          this.lobbyView.setVisible(true);
+          this.renderLobby();
+          break;
+        }
 
         this.lobbyView.setVisible(false);
         this.hudView.setMatchVisible(true);
@@ -504,8 +516,8 @@ export class GameApp {
     switch (ev.type) {
       case 'SHOT_HIT': {
         this.audio.playShotHit(ev.shotType, ev.quality, court);
-        if (ev.quality === 'PERFECT' && ev.hitter === this.playerIndex) {
-          this.scene.triggerPerfectShockwave({ x: ev.pos.x, z: ev.pos.z });
+        if (ev.quality === 'CLEAN' && ev.hitter === this.playerIndex) {
+          this.scene.triggerCleanShockwave({ x: ev.pos.x, z: ev.pos.z });
         }
         break;
       }
@@ -527,14 +539,6 @@ export class GameApp {
       }
       case 'POINT_SCORED': {
         this.audio.playPointScored(ev.winner === this.playerIndex, ev.score.keyPointLabel);
-        break;
-      }
-      case 'TAKEOVER_ON': {
-        this.audio.playTakeover(true);
-        break;
-      }
-      case 'TAKEOVER_OFF': {
-        this.audio.playTakeover(false);
         break;
       }
       case 'MATCH_OVER': {
@@ -676,6 +680,7 @@ export class GameApp {
         const raw = this.getActiveRawState();
         const localView = raw ? cloneMatchState(toLocalView(raw, this.yourSide)) : null;
         const m = this.perf.getMetrics();
+        const avatarStatus = this.scene.getAvatarStatus(this.playerIndex);
         return {
           mode: this.mode,
           yourSide: this.yourSide,
@@ -684,6 +689,9 @@ export class GameApp {
           reconnectCount: this.ws.getReconnectCount(),
           rttMs: this.ws.getRttMs(),
           matchState: localView,
+          avatarLoaded: avatarStatus.loaded,
+          avatarSource: avatarStatus.source,
+          avatarTriangles: avatarStatus.triangles,
           qualityTier: m.qualityTier,
           activeDpr: m.activeDpr,
           estHz: m.estHz,
@@ -714,27 +722,24 @@ export class GameApp {
           this.ws.sendTestCommand({ cmd: 'set_score', args: patch });
         }
       },
-      setTakeover: (playerIndex: PlayerIndex, value: number) => {
-        if (this.mode === 'single' && this.singleState) {
-          const next = cloneMatchState(this.singleState);
-          const clamped = Math.max(0, Math.min(PHYSICS_CONSTANTS.TAKEOVER_MAX_ENERGY, value));
-          next.players[playerIndex].takeoverEnergy = clamped;
-          if (clamped >= PHYSICS_CONSTANTS.TAKEOVER_MAX_ENERGY) {
-            next.players[playerIndex].takeoverPointsLeft = PHYSICS_CONSTANTS.TAKEOVER_DURATION_POINTS;
-            next.players[playerIndex].takeoverCooldown = false;
-          } else {
-            next.players[playerIndex].takeoverPointsLeft = 0;
-          }
-          this.singleState = next;
-        } else if (this.mode === 'online') {
-          this.ws.sendTestCommand({ cmd: 'set_takeover', args: { playerIndex, value } });
-        }
-      },
       triggerHawkeyeShot: (opts) => {
         if (this.mode === 'single' && this.singleState) {
           this.singleState = launchHawkeyeTestBall(this.singleState, opts, this.singleRng);
         } else if (this.mode === 'online') {
           this.ws.sendTestCommand({ cmd: 'trigger_hawkeye', args: opts });
+        }
+      },
+      spawnIncomingBall: (opts: SpawnIncomingBallOptions) => {
+        const worldOpts: SpawnIncomingBallOptions = {
+          targetX: opts.targetX * this.yourSide,
+          targetZ: opts.targetZ * this.yourSide,
+          speedXZ: opts.speedXZ,
+          forPlayerIndex: opts.forPlayerIndex ?? this.playerIndex,
+        };
+        if (this.mode === 'single' && this.singleState) {
+          this.singleState = spawnIncomingTestBall(this.singleState, worldOpts, this.singleRng);
+        } else if (this.mode === 'online') {
+          this.ws.sendTestCommand({ cmd: 'spawn_incoming_ball', args: worldOpts });
         }
       },
       fastForwardPause: (seconds: number) => {

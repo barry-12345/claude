@@ -4,16 +4,16 @@ import {
   COURT_DIM,
   COURTS,
   netHeightAt,
-  PHYSICS_CONSTANTS,
   type ArchetypeId,
   type CourtId,
   type HawkeyeState,
   type MatchState,
   type PlayerIndex,
+  type ShotActionKey,
 } from '@court2k/shared';
-import type { PlayerAvatarController } from '../contracts.js';
+import type { AvatarStatus, PlayerAvatarController } from '../contracts.js';
 import type { QualityPreset } from '../core/PerfManager.js';
-import { ProceduralPlayerAvatar } from './PlayerAvatar.js';
+import { GlbPlayerAvatar } from './PlayerAvatar.js';
 
 interface DustParticle {
   active: boolean;
@@ -22,6 +22,64 @@ interface DustParticle {
   age: number;
   maxAge: number;
 }
+
+interface DaylightTheme {
+  skyTop: string;
+  skyHorizon: string;
+  sunColor: string;
+  sunIntensity: number;
+  hemiSky: string;
+  hemiGround: string;
+  hemiIntensity: number;
+  standColor: string;
+  boardColor: string;
+  accentStripColor: string;
+}
+
+const DAYLIGHT_THEMES: Record<CourtId, DaylightTheme> = {
+  hard: {
+    skyTop: '#60a5fa',
+    skyHorizon: '#dbeafe',
+    sunColor: '#fffaf0',
+    sunIntensity: 2.35,
+    hemiSky: '#dbeafe',
+    hemiGround: '#8fa3b8',
+    hemiIntensity: 1.28,
+    standColor: '#d5dde8',
+    boardColor: '#1e3a5f',
+    accentStripColor: '#38bdf8',
+  },
+  clay: {
+    skyTop: '#5b9ee8',
+    skyHorizon: '#fde8d0',
+    sunColor: '#fff2d9',
+    sunIntensity: 2.45,
+    hemiSky: '#e0f2fe',
+    hemiGround: '#c9977b',
+    hemiIntensity: 1.28,
+    standColor: '#e6ddd2',
+    boardColor: '#1b4d3e',
+    accentStripColor: '#fb923c',
+  },
+  grass: {
+    skyTop: '#67a9f0',
+    skyHorizon: '#e5f3ff',
+    sunColor: '#fffdf7',
+    sunIntensity: 2.30,
+    hemiSky: '#e0f2fe',
+    hemiGround: '#7ca886',
+    hemiIntensity: 1.28,
+    standColor: '#e8ece9',
+    boardColor: '#14452f',
+    accentStripColor: '#9333ea',
+  },
+};
+
+const STANCE_RING_COLORS: Record<Exclude<ShotActionKey, 'none'>, string> = {
+  J: '#f59e0b',
+  K: '#06b6d4',
+  L: '#a855f7',
+};
 
 function makeSurfaceTexture(courtId: CourtId): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -35,20 +93,18 @@ function makeSurfaceTexture(courtId: CourtId): THREE.CanvasTexture {
     ctx.fillRect(0, 0, 512, 512);
 
     if (courtId === 'grass') {
-      // Wimbledon horizontal mowed grass stripes
       const stripeCount = 16;
       const stripeH = 512 / stripeCount;
       for (let i = 0; i < stripeCount; i++) {
-        ctx.fillStyle = i % 2 === 0 ? '#2F6E3B' : '#265D31';
+        ctx.fillStyle = i % 2 === 0 ? '#3B8A49' : '#2F753C';
         ctx.fillRect(0, i * stripeH, 512, stripeH);
       }
     }
 
-    // Fine micro-grain for tactile realism
     for (let i = 0; i < 4200; i++) {
       const x = (i * 73) % 512;
       const y = (i * 137 + Math.floor(i / 7) * 19) % 512;
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.05)';
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.045)';
       ctx.fillRect(x, y, 2, 2);
     }
   }
@@ -67,7 +123,7 @@ function makeNetTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d');
   if (ctx) {
     ctx.clearRect(0, 0, 128, 64);
-    ctx.strokeStyle = 'rgba(225, 232, 240, 0.85)';
+    ctx.strokeStyle = 'rgba(232, 238, 246, 0.88)';
     ctx.lineWidth = 2;
     for (let x = 0; x <= 128; x += 8) {
       ctx.beginPath();
@@ -116,10 +172,21 @@ export class CourtScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
 
+  private readonly hemiLight: THREE.HemisphereLight;
   private readonly dirLight: THREE.DirectionalLight;
+  private readonly rimLight: THREE.DirectionalLight;
+  private readonly skyUniforms: {
+    topColor: { value: THREE.Color };
+    horizonColor: { value: THREE.Color };
+  };
+  private readonly bgColor: THREE.Color;
+  private readonly fog: THREE.Fog;
+
   private readonly innerCourtMat: THREE.MeshStandardMaterial;
   private readonly outerCourtMat: THREE.MeshStandardMaterial;
-  private readonly ledStripMat: THREE.MeshBasicMaterial;
+  private readonly boardMat: THREE.MeshStandardMaterial;
+  private readonly standMat: THREE.MeshStandardMaterial;
+  private readonly accentStripMat: THREE.MeshBasicMaterial;
   private readonly surfaceTextures: Record<CourtId, THREE.CanvasTexture>;
 
   private readonly avatars: [PlayerAvatarController, PlayerAvatarController];
@@ -136,11 +203,13 @@ export class CourtScene {
   private readonly dustParticles: DustParticle[] = [];
   private dustCursor = 0;
 
-  // 2K Shot Meter 3D arc under local player
-  private readonly meterGroup: THREE.Group;
-  private readonly meterGreenMesh: THREE.Mesh;
-  private readonly meterNeedleGroup: THREE.Group;
-  private readonly meterShockwave: THREE.Mesh;
+  // V2 subtle ground pre-selection ring (only when armedAction !== 'none' during rally)
+  private readonly shotStanceRing: THREE.Mesh;
+  private readonly shotStanceRingMat: THREE.MeshBasicMaterial;
+
+  // V2 CLEAN sweet-spot emerald wave (0.32s)
+  private readonly cleanShockwave: THREE.Mesh;
+  private readonly cleanShockwaveMat: THREE.MeshBasicMaterial;
   private shockwaveTimer = 0;
 
   // Hawkeye 3D visual markers
@@ -153,8 +222,6 @@ export class CourtScene {
   private currentArchetypes: [ArchetypeId, ArchetypeId] = ['allcourt', 'defender'];
   private particleScale = 1.0;
   private lastAppliedDpr = -1;
-  private lastMeterHalfWidth = -1;
-  private lastMeterSweetCenter = -1;
 
   private readonly camTarget = new THREE.Vector3(0, 0.3, 1.8);
   private readonly camPos = new THREE.Vector3(0, 10.4, 24.0);
@@ -168,21 +235,63 @@ export class CourtScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.18;
+
+    const initialTheme = DAYLIGHT_THEMES.hard;
+    this.bgColor = new THREE.Color(initialTheme.skyHorizon);
+    this.fog = new THREE.Fog(initialTheme.skyHorizon, 64, 150);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#09111f');
-    this.scene.fog = new THREE.Fog('#09111f', 40, 96);
+    this.scene.background = this.bgColor;
+    this.scene.fog = this.fog;
 
-    this.camera = new THREE.PerspectiveCamera(48, 16 / 9, 0.2, 160);
+    this.camera = new THREE.PerspectiveCamera(48, 16 / 9, 0.2, 220);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camTarget);
 
-    // Lighting
-    const hemi = new THREE.HemisphereLight('#e0efff', '#223045', 1.12);
-    this.scene.add(hemi);
+    // 1-Draw-Call Gradient Sky Dome
+    this.skyUniforms = {
+      topColor: { value: new THREE.Color(initialTheme.skyTop) },
+      horizonColor: { value: new THREE.Color(initialTheme.skyHorizon) },
+    };
+    const skyDome = new THREE.Mesh(
+      new THREE.SphereGeometry(120, 32, 16),
+      new THREE.ShaderMaterial({
+        uniforms: this.skyUniforms,
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        vertexShader: `
+          varying vec3 vWorldPos;
+          void main() {
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vWorldPos = worldPos.xyz;
+            gl_Position = projectionMatrix * viewMatrix * worldPos;
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 topColor;
+          uniform vec3 horizonColor;
+          varying vec3 vWorldPos;
+          void main() {
+            float h = normalize(vWorldPos).y;
+            float t = pow(clamp(h, 0.0, 1.0), 0.62);
+            gl_FragColor = vec4(mix(horizonColor, topColor, t), 1.0);
+          }
+        `,
+      })
+    );
+    this.scene.add(skyDome);
 
-    this.dirLight = new THREE.DirectionalLight('#fff8eb', 1.65);
+    // Bright Grand Slam Daylight Lighting
+    this.hemiLight = new THREE.HemisphereLight(
+      initialTheme.hemiSky,
+      initialTheme.hemiGround,
+      initialTheme.hemiIntensity
+    );
+    this.scene.add(this.hemiLight);
+
+    this.dirLight = new THREE.DirectionalLight(initialTheme.sunColor, initialTheme.sunIntensity);
     this.dirLight.position.set(14, 24, 16);
     this.dirLight.castShadow = true;
     this.dirLight.shadow.mapSize.set(1024, 1024);
@@ -195,9 +304,9 @@ export class CourtScene {
     this.dirLight.shadow.bias = -0.0005;
     this.scene.add(this.dirLight);
 
-    const rimLight = new THREE.DirectionalLight('#7dd3fc', 0.45);
-    rimLight.position.set(-14, 12, -18);
-    this.scene.add(rimLight);
+    this.rimLight = new THREE.DirectionalLight('#e0f2fe', 0.55);
+    this.rimLight.position.set(-14, 12, -18);
+    this.scene.add(this.rimLight);
 
     // Surface textures
     this.surfaceTextures = {
@@ -209,7 +318,7 @@ export class CourtScene {
     // Outer surround floor
     this.outerCourtMat = new THREE.MeshStandardMaterial({
       color: COURTS.hard.outerColor,
-      roughness: 0.85,
+      roughness: 0.82,
       metalness: 0.02,
     });
     const outerFloor = new THREE.Mesh(new THREE.PlaneGeometry(24, 38), this.outerCourtMat);
@@ -220,8 +329,8 @@ export class CourtScene {
     // Inner playable court surface
     this.innerCourtMat = new THREE.MeshStandardMaterial({
       map: this.surfaceTextures.hard,
-      roughness: 0.78,
-      metalness: 0.03,
+      roughness: 0.76,
+      metalness: 0.02,
     });
     const innerFloor = new THREE.Mesh(
       new THREE.PlaneGeometry(COURT_DIM.DOUBLES_HALF_WIDTH * 2 + 0.8, COURT_DIM.HALF_LENGTH * 2 + 1.2),
@@ -235,13 +344,15 @@ export class CourtScene {
     this.buildCourtLines();
     this.buildNet();
 
-    this.ledStripMat = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
+    this.boardMat = new THREE.MeshStandardMaterial({ color: initialTheme.boardColor, roughness: 0.62 });
+    this.standMat = new THREE.MeshStandardMaterial({ color: initialTheme.standColor, roughness: 0.82 });
+    this.accentStripMat = new THREE.MeshBasicMaterial({ color: initialTheme.accentStripColor });
     this.buildStadium();
 
-    // Avatars
+    // Avatars (Blender 5.2 GLB)
     this.avatars = [
-      new ProceduralPlayerAvatar(ARCHETYPES.allcourt),
-      new ProceduralPlayerAvatar(ARCHETYPES.defender),
+      new GlbPlayerAvatar(ARCHETYPES.allcourt),
+      new GlbPlayerAvatar(ARCHETYPES.defender),
     ];
     this.scene.add(this.avatars[0].root, this.avatars[1].root);
 
@@ -249,7 +360,7 @@ export class CourtScene {
     const ballTex = makeBallTexture();
     this.ballMesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.062, 16, 16),
-      new THREE.MeshStandardMaterial({ map: ballTex, roughness: 0.42 })
+      new THREE.MeshStandardMaterial({ map: ballTex, roughness: 0.38 })
     );
     this.ballMesh.castShadow = true;
     this.scene.add(this.ballMesh);
@@ -259,7 +370,7 @@ export class CourtScene {
       new THREE.MeshBasicMaterial({
         color: '#000000',
         transparent: true,
-        opacity: 0.42,
+        opacity: 0.38,
         depthWrite: false,
       })
     );
@@ -323,77 +434,39 @@ export class CourtScene {
     }
     this.scene.add(this.dustMesh);
 
-    // 2K Arc Shot Meter (under local player's feet)
-    this.meterGroup = new THREE.Group();
-    this.meterGroup.rotation.x = -Math.PI * 0.42;
-    this.meterGroup.visible = false;
-    this.scene.add(this.meterGroup);
+    // V2 Ground Pre-selection Shot Ring (NO progress bar, NO needle)
+    this.shotStanceRingMat = new THREE.MeshBasicMaterial({
+      color: STANCE_RING_COLORS.J,
+      transparent: true,
+      opacity: 0.86,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.shotStanceRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.50, 0.62, 36),
+      this.shotStanceRingMat
+    );
+    this.shotStanceRing.rotation.x = -Math.PI / 2;
+    this.shotStanceRing.position.y = 0.018;
+    this.shotStanceRing.visible = false;
+    this.scene.add(this.shotStanceRing);
 
-    const trackGeo = new THREE.RingGeometry(0.68, 0.84, 36, 1, Math.PI * 0.15, Math.PI * 0.7);
-    const trackMesh = new THREE.Mesh(
-      trackGeo,
-      new THREE.MeshBasicMaterial({
-        color: '#0f172a',
-        transparent: true,
-        opacity: 0.85,
-        side: THREE.DoubleSide,
-        depthTest: false,
-      })
+    // V2 CLEAN sweet-spot emerald shockwave (0.32s)
+    this.cleanShockwaveMat = new THREE.MeshBasicMaterial({
+      color: '#22e574',
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.cleanShockwave = new THREE.Mesh(
+      new THREE.RingGeometry(0.56, 0.72, 36),
+      this.cleanShockwaveMat
     );
-    trackMesh.renderOrder = 10;
-    this.meterGroup.add(trackMesh);
-
-    this.meterGreenMesh = new THREE.Mesh(
-      new THREE.RingGeometry(0.69, 0.83, 24, 1, 0, Math.PI * 0.14),
-      new THREE.MeshBasicMaterial({
-        color: '#22e574',
-        transparent: true,
-        opacity: 0.95,
-        side: THREE.DoubleSide,
-        depthTest: false,
-      })
-    );
-    this.meterGreenMesh.renderOrder = 11;
-    this.meterGroup.add(this.meterGreenMesh);
-
-    this.meterNeedleGroup = new THREE.Group();
-    const needleOutline = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.11, 0.3),
-      new THREE.MeshBasicMaterial({
-        color: '#09101a',
-        side: THREE.DoubleSide,
-        depthTest: false,
-      })
-    );
-    needleOutline.position.y = 0.76;
-    needleOutline.renderOrder = 12;
-    const needle = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.075, 0.27),
-      new THREE.MeshBasicMaterial({
-        color: '#facc15',
-        side: THREE.DoubleSide,
-        depthTest: false,
-      })
-    );
-    needle.position.y = 0.76;
-    needle.renderOrder = 13;
-    this.meterNeedleGroup.add(needleOutline, needle);
-    this.meterGroup.add(this.meterNeedleGroup);
-
-    this.meterShockwave = new THREE.Mesh(
-      new THREE.RingGeometry(0.65, 0.85, 36),
-      new THREE.MeshBasicMaterial({
-        color: '#22e574',
-        transparent: true,
-        opacity: 0.9,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      })
-    );
-    this.meterShockwave.rotation.x = -Math.PI / 2;
-    this.meterShockwave.position.y = 0.03;
-    this.meterShockwave.visible = false;
-    this.scene.add(this.meterShockwave);
+    this.cleanShockwave.rotation.x = -Math.PI / 2;
+    this.cleanShockwave.position.y = 0.025;
+    this.cleanShockwave.visible = false;
+    this.scene.add(this.cleanShockwave);
 
     // Hawkeye 3D markers
     this.hawkeyeGroup = new THREE.Group();
@@ -433,11 +506,26 @@ export class CourtScene {
     if (this.currentCourt === courtId) return;
     this.currentCourt = courtId;
     const cfg = COURTS[courtId];
+    const theme = DAYLIGHT_THEMES[courtId];
+
     this.innerCourtMat.map = this.surfaceTextures[courtId];
     this.innerCourtMat.needsUpdate = true;
     this.outerCourtMat.color.set(cfg.outerColor);
-    const ledHex = courtId === 'hard' ? '#38bdf8' : courtId === 'clay' ? '#fb923c' : '#4ade80';
-    this.ledStripMat.color.set(ledHex);
+
+    this.skyUniforms.topColor.value.set(theme.skyTop);
+    this.skyUniforms.horizonColor.value.set(theme.skyHorizon);
+    this.bgColor.set(theme.skyHorizon);
+    this.fog.color.set(theme.skyHorizon);
+
+    this.dirLight.color.set(theme.sunColor);
+    this.dirLight.intensity = theme.sunIntensity;
+    this.hemiLight.color.set(theme.hemiSky);
+    this.hemiLight.groundColor.set(theme.hemiGround);
+    this.hemiLight.intensity = theme.hemiIntensity;
+
+    this.standMat.color.set(theme.standColor);
+    this.boardMat.color.set(theme.boardColor);
+    this.accentStripMat.color.set(theme.accentStripColor);
   }
 
   public setArchetypes(pair: [ArchetypeId, ArchetypeId]): void {
@@ -447,6 +535,18 @@ export class CourtScene {
         this.avatars[idx].setArchetype(ARCHETYPES[pair[idx]]);
       }
     }
+  }
+
+  public getAvatarStatus(playerIndex: PlayerIndex = 0): AvatarStatus {
+    const primary = this.avatars[playerIndex].getStatus();
+    const secondary = this.avatars[1 - playerIndex].getStatus();
+    const bothLoaded = primary.loaded && secondary.loaded;
+    return {
+      loaded: bothLoaded,
+      source: bothLoaded ? 'glb' : 'fallback',
+      triangles: primary.triangles,
+      clipNames: primary.clipNames,
+    };
   }
 
   public applyPerfPreset(preset: QualityPreset, activeDpr: number): void {
@@ -475,18 +575,19 @@ export class CourtScene {
     this.renderer.setSize(width, height, false);
   }
 
-  public triggerPerfectShockwave(pos: { x: number; z: number }): void {
-    this.meterShockwave.position.set(pos.x, 0.03, pos.z);
-    this.meterShockwave.scale.setScalar(1);
-    this.meterShockwave.visible = true;
-    this.shockwaveTimer = 0.45;
+  public triggerCleanShockwave(pos: { x: number; z: number }): void {
+    this.cleanShockwave.position.set(pos.x, 0.025, pos.z);
+    this.cleanShockwave.scale.setScalar(1);
+    this.cleanShockwaveMat.opacity = 0.85;
+    this.cleanShockwave.visible = true;
+    this.shockwaveTimer = 0.32;
   }
 
   public renderLobbyPreview(courtId: CourtId, archetypeId: ArchetypeId, elapsedSec: number, dt: number): void {
     this.setCourt(courtId);
     this.setArchetypes([archetypeId, 'defender']);
 
-    const previewPos = { x: 2.2, y: 0, z: 11.4 };
+    const previewPos = { x: 2.35, y: 0, z: 11.4 };
     this.avatars[0].updatePose(
       {
         index: 0,
@@ -494,23 +595,21 @@ export class CourtScene {
         archetype: archetypeId,
         pos: previewPos,
         vel: { x: 0, y: 0, z: 0 },
-        yaw: Math.sin(elapsedSec * 0.65) * 0.45 - 0.3,
+        // Face toward +Z camera in 3/4 view so face, chest stripe, racquet, headgear & shorts are clearly visible
+        yaw: Math.PI - 0.32 + Math.sin(elapsedSec * 0.65) * 0.32,
         anim: 'idle',
         animTime: elapsedSec,
         isSliding: false,
         slideTimer: 0,
         moveAccelTime: 0,
-        meter: {
-          active: false,
-          action: 'none',
-          progress: 0,
-          sweetCenter: 0.78,
-          effectiveHalfWidth: 0.055,
+        stance: {
+          armedAction: 'none',
+          holdDurationSec: 0,
+          bufferRemainingSec: 0,
+          lastConsumedHitTick: -1,
+          lockedAimX: 0,
           lastQuality: null,
         },
-        takeoverEnergy: 0,
-        takeoverPointsLeft: 0,
-        takeoverCooldown: false,
       },
       dt
     );
@@ -519,11 +618,12 @@ export class CourtScene {
     this.ballShadow.visible = false;
     this.landingRing.visible = false;
     this.trailMesh.count = 0;
-    this.meterGroup.visible = false;
+    this.shotStanceRing.visible = false;
+    this.cleanShockwave.visible = false;
     this.hawkeyeGroup.visible = false;
 
-    this.camPos.lerp(new THREE.Vector3(3.6, 2.2, 16.0), 1 - Math.exp(-5 * dt));
-    this.camTarget.lerp(new THREE.Vector3(0.8, 0.95, 9.2), 1 - Math.exp(-5 * dt));
+    this.camPos.lerp(new THREE.Vector3(3.15, 1.55, 14.85), 1 - Math.exp(-5 * dt));
+    this.camTarget.lerp(new THREE.Vector3(1.15, 0.96, 10.6), 1 - Math.exp(-5 * dt));
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camTarget);
     this.renderer.render(this.scene, this.camera);
@@ -561,7 +661,7 @@ export class CourtScene {
     this.ballShadow.position.set(b.pos.x, 0.009, b.pos.z);
     const heightScale = Math.max(0.45, 1.15 - b.pos.y * 0.14);
     this.ballShadow.scale.setScalar(heightScale);
-    (this.ballShadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0.12, 0.45 - b.pos.y * 0.06);
+    (this.ballShadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0.12, 0.4 - b.pos.y * 0.06);
 
     // Ball trail
     if (b.active) {
@@ -593,53 +693,27 @@ export class CourtScene {
       this.landingRing.visible = false;
     }
 
-    // 2K Arc Shot Meter under local player
+    // V2 Ground Pre-selection Shot Ring under local player (only in rally when armedAction !== 'none')
     const localPlayer = localState.players[localPlayerIndex];
-    if (localPlayer.meter.active) {
-      this.meterGroup.visible = true;
-      this.meterGroup.position.set(localPlayer.pos.x, 0.14, localPlayer.pos.z + 0.12);
-
-      const arcStart = Math.PI * 0.15;
-      const arcSpan = Math.PI * 0.7;
-      const maxP = PHYSICS_CONSTANTS.METER_MAX_PROGRESS;
-      const pNorm = Math.min(1, Math.max(0, localPlayer.meter.progress / maxP));
-
-      if (
-        Math.abs(localPlayer.meter.effectiveHalfWidth - this.lastMeterHalfWidth) > 1e-4 ||
-        Math.abs(localPlayer.meter.sweetCenter - this.lastMeterSweetCenter) > 1e-4
-      ) {
-        this.lastMeterHalfWidth = localPlayer.meter.effectiveHalfWidth;
-        this.lastMeterSweetCenter = localPlayer.meter.sweetCenter;
-        const sweetNorm = localPlayer.meter.sweetCenter / maxP;
-        const halfWidthNorm = localPlayer.meter.effectiveHalfWidth / maxP;
-        const greenStartAngle = arcStart + (1 - (sweetNorm + halfWidthNorm)) * arcSpan;
-        const greenSpan = Math.max(0.04, halfWidthNorm * 2 * arcSpan);
-        this.meterGreenMesh.geometry.dispose();
-        this.meterGreenMesh.geometry = new THREE.RingGeometry(
-          0.69,
-          0.83,
-          24,
-          1,
-          greenStartAngle,
-          greenSpan
-        );
-      }
-
-      // Needle sweeps right-to-left or left-to-right across top arc
-      const needleAngle = Math.PI * 0.35 - pNorm * arcSpan;
-      this.meterNeedleGroup.rotation.z = needleAngle;
+    const armed = localPlayer.stance.armedAction;
+    if (localState.phase === 'rally' && armed !== 'none') {
+      this.shotStanceRing.visible = true;
+      this.shotStanceRing.position.set(localPlayer.pos.x, 0.018, localPlayer.pos.z);
+      this.shotStanceRingMat.color.set(STANCE_RING_COLORS[armed]);
+      const pulse = 1 + Math.sin(localState.tick * 0.28) * 0.06;
+      this.shotStanceRing.scale.setScalar(pulse);
     } else {
-      this.meterGroup.visible = false;
+      this.shotStanceRing.visible = false;
     }
 
-    // Perfect shockwave decay
+    // CLEAN sweet-spot wave decay (0.32s)
     if (this.shockwaveTimer > 0) {
       this.shockwaveTimer = Math.max(0, this.shockwaveTimer - dt);
-      const t = 1 - this.shockwaveTimer / 0.45;
-      this.meterShockwave.scale.setScalar(1 + t * 2.1);
-      (this.meterShockwave.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.85;
+      const t = 1 - this.shockwaveTimer / 0.32;
+      this.cleanShockwave.scale.setScalar(1 + t * 1.85);
+      this.cleanShockwaveMat.opacity = (1 - t) * 0.82;
       if (this.shockwaveTimer <= 0) {
-        this.meterShockwave.visible = false;
+        this.cleanShockwave.visible = false;
       }
     }
 
@@ -791,7 +865,7 @@ export class CourtScene {
 
   private buildNet(): void {
     const postGeo = new THREE.CylinderGeometry(0.045, 0.045, COURT_DIM.NET_POST_HEIGHT, 12);
-    const postMat = new THREE.MeshStandardMaterial({ color: '#1f2937', metalness: 0.6, roughness: 0.3 });
+    const postMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.45, roughness: 0.35 });
     for (const sign of [-1, 1]) {
       const post = new THREE.Mesh(postGeo, postMat);
       post.position.set(sign * COURT_DIM.NET_POST_X, COURT_DIM.NET_POST_HEIGHT / 2, 0);
@@ -799,13 +873,12 @@ export class CourtScene {
       this.scene.add(post);
     }
 
-    // Net mesh with sagged top contour matching netHeightAt(x)
     const segs = 24;
     const netGeo = new THREE.PlaneGeometry(COURT_DIM.NET_POST_X * 2, 1.0, segs, 1);
     const posAttr = netGeo.attributes.position;
     for (let i = 0; i < posAttr.count; i++) {
       const x = posAttr.getX(i);
-      const yNorm = posAttr.getY(i) + 0.5; // 0..1
+      const yNorm = posAttr.getY(i) + 0.5;
       posAttr.setY(i, yNorm * netHeightAt(x));
     }
     netGeo.computeVertexNormals();
@@ -819,7 +892,6 @@ export class CourtScene {
     const netMesh = new THREE.Mesh(netGeo, netMat);
     this.scene.add(netMesh);
 
-    // White top tape following netHeightAt(x)
     const tapeGeo = new THREE.PlaneGeometry(COURT_DIM.NET_POST_X * 2, 0.075, segs, 1);
     const tapeAttr = tapeGeo.attributes.position;
     for (let i = 0; i < tapeAttr.count; i++) {
@@ -834,7 +906,6 @@ export class CourtScene {
     tapeMesh.position.z = 0.003;
     this.scene.add(tapeMesh);
 
-    // Center strap
     const strap = new THREE.Mesh(
       new THREE.BoxGeometry(0.05, COURT_DIM.NET_CENTER_HEIGHT, 0.02),
       new THREE.MeshBasicMaterial({ color: '#ffffff' })
@@ -844,7 +915,6 @@ export class CourtScene {
   }
 
   private buildStadium(): void {
-    const boardMat = new THREE.MeshStandardMaterial({ color: '#111827', roughness: 0.7 });
     const wallSpecs: Array<[number, number, number, number]> = [
       [0, -18.5, 22, 1.0],
       [0, 18.5, 22, 1.0],
@@ -853,52 +923,55 @@ export class CourtScene {
     ];
 
     for (const [x, z, w, d] of wallSpecs) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 0.95, d), boardMat);
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 0.95, d), this.boardMat);
       wall.position.set(x, 0.475, z);
+      wall.receiveShadow = true;
       this.scene.add(wall);
 
-      const led = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), this.ledStripMat);
-      led.position.set(x, 0.98, z);
-      this.scene.add(led);
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), this.accentStripMat);
+      strip.position.set(x, 0.98, z);
+      this.scene.add(strip);
     }
 
-    // Umpire chair
-    const chairMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.5 });
+    // Light architectural umpire chair
+    const chairMat = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.45 });
     const chairBase = new THREE.Mesh(new THREE.BoxGeometry(0.65, 1.85, 0.65), chairMat);
     chairBase.position.set(-6.4, 0.925, 0);
     chairBase.castShadow = true;
     this.scene.add(chairBase);
 
-    // Tiered stadium stands (merged simple steps)
-    const standMat = new THREE.MeshStandardMaterial({ color: '#172033', roughness: 0.9 });
+    // Bright Grand Slam limestone/cream tiered stands
     for (let t = 0; t < 3; t++) {
-      const back = new THREE.Mesh(new THREE.BoxGeometry(28, 1.2, 2.2), standMat);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(28, 1.2, 2.2), this.standMat);
       back.position.set(0, 1.2 + t * 1.15, -21.5 - t * 2.2);
+      back.receiveShadow = true;
       this.scene.add(back);
 
-      const left = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 42), standMat);
+      const left = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 42), this.standMat);
       left.position.set(-14.2 - t * 2.2, 1.2 + t * 1.15, 0);
+      left.receiveShadow = true;
       this.scene.add(left);
 
-      const right = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 42), standMat);
+      const right = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 42), this.standMat);
       right.position.set(14.2 + t * 2.2, 1.2 + t * 1.15, 0);
+      right.receiveShadow = true;
       this.scene.add(right);
     }
 
-    // Instanced spectators across stands (1 single draw call!)
+    // Summer-dressed instanced spectators (1 single draw call)
     const spectatorCount = 240;
     const specMesh = new THREE.InstancedMesh(
       new THREE.CapsuleGeometry(0.18, 0.35, 4, 8),
-      new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.8 }),
+      new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.72 }),
       spectatorCount
     );
     const palette = [
       new THREE.Color('#38bdf8'),
-      new THREE.Color('#f59e0b'),
-      new THREE.Color('#e2e8f0'),
-      new THREE.Color('#ef4444'),
+      new THREE.Color('#fbbf24'),
+      new THREE.Color('#f8fafc'),
+      new THREE.Color('#fb7185'),
       new THREE.Color('#34d399'),
-      new THREE.Color('#94a3b8'),
+      new THREE.Color('#f97316'),
     ];
     let idx = 0;
     for (let tier = 0; tier < 3 && idx < spectatorCount; tier++) {
@@ -931,9 +1004,9 @@ export class CourtScene {
     if (specMesh.instanceColor) specMesh.instanceColor.needsUpdate = true;
     this.scene.add(specMesh);
 
-    // 4 Corner Floodlight Towers
-    const towerMat = new THREE.MeshStandardMaterial({ color: '#1e293b', metalness: 0.4 });
-    const bulbMat = new THREE.MeshBasicMaterial({ color: '#fef9c3' });
+    // 4 Corner Stadium Architectural Pylons (light brushed silver-white)
+    const towerMat = new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.25, roughness: 0.45 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.35 });
     const corners: Array<[number, number]> = [
       [-17, -23],
       [17, -23],
@@ -941,12 +1014,12 @@ export class CourtScene {
       [17, 23],
     ];
     for (const [cx, cz] of corners) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 14, 8), towerMat);
-      pole.position.set(cx, 7, cz);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 12.5, 8), towerMat);
+      pole.position.set(cx, 6.25, cz);
       this.scene.add(pole);
 
-      const head = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.4), bulbMat);
-      head.position.set(cx, 14.2, cz);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.75, 0.35), trimMat);
+      head.position.set(cx, 12.7, cz);
       head.lookAt(0, 0, 0);
       this.scene.add(head);
     }
