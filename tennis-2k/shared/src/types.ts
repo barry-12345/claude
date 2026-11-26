@@ -6,9 +6,9 @@ export type PlayerSide = 1 | -1; // +1 = P0(+Z近端), -1 = P1(-Z远端)
 export type PlayerIndex = 0 | 1; // 0 对应 side=+1, 1 对应 side=-1
 
 export type ShotActionKey = 'none' | 'J' | 'K' | 'L';
-export type InputPhase = 'idle' | 'hold' | 'release';
 export type ShotType = 'serve_flat' | 'serve_kick' | 'topspin' | 'slice' | 'dropshot' | 'lob';
-export type ShotQuality = 'PERFECT' | 'GOOD' | 'EARLY' | 'LATE' | 'VERY_EARLY' | 'VERY_LATE';
+export type ShotQuality = 'CLEAN' | 'SOLID' | 'STRETCH';
+
 export type PlayerAnimState =
   | 'idle'
   | 'run'
@@ -39,7 +39,8 @@ export type KeyPointLabel =
   | 'DECIDING_POINT'
   | 'SET_POINT'
   | 'MATCH_POINT'
-  | 'TIEBREAK';
+  | 'TIEBREAK'
+  | 'SUPER_TIEBREAK';
 
 export type ErrorCode =
   | 'INVALID_MESSAGE'
@@ -73,10 +74,13 @@ export interface ArchetypeConfig {
   readonly power: number;
   readonly speed: number;
   readonly spin: number;
-  readonly timing: number;
-  readonly net: number; // power+speed+spin+timing+net === 400
+  readonly control: number; // V2 CTL（替代 V1 timing）
+  readonly net: number; // 严格满足 power+speed+spin+control+net === 400
   readonly jerseyPrimary: string;
   readonly jerseyAccent: string;
+  readonly shortsColor: string;
+  readonly hairColor: string;
+  readonly skinTone: string;
   readonly headgear: 'headband' | 'wristband_only' | 'visor' | 'cap_backwards';
   readonly shoulderScale: number;
 }
@@ -116,15 +120,15 @@ export interface PlayerInputFrame {
   aimX: number;
   aimZ: number;
   action: ShotActionKey;
-  phase: InputPhase;
+  actionPressed: boolean;
 }
 
-export interface MeterState {
-  active: boolean;
-  action: ShotActionKey;
-  progress: number;
-  sweetCenter: number;
-  effectiveHalfWidth: number;
+export interface ShotStanceState {
+  armedAction: ShotActionKey;
+  holdDurationSec: number;
+  bufferRemainingSec: number;
+  lastConsumedHitTick: number;
+  lockedAimX: number;
   lastQuality: ShotQuality | null;
 }
 
@@ -140,10 +144,7 @@ export interface PlayerState {
   isSliding: boolean;
   slideTimer: number;
   moveAccelTime: number;
-  meter: MeterState;
-  takeoverEnergy: number;
-  takeoverPointsLeft: number;
-  takeoverCooldown: boolean;
+  stance: ShotStanceState;
 }
 
 export interface BallState {
@@ -191,8 +192,8 @@ export interface PlayerMatchStats {
   firstServesTotal: number;
   winners: number;
   unforcedErrors: number;
-  perfectShots: number;
-  totalMeterShots: number;
+  cleanShots: number;
+  totalShots: number;
 }
 
 export interface ScoreState {
@@ -239,12 +240,48 @@ export interface ScorePatch {
   serveNumber?: 1 | 2;
 }
 
+export interface SpawnIncomingBallOptions {
+  targetX: number;
+  targetZ: number;
+  speedXZ?: number;
+  forPlayerIndex?: PlayerIndex;
+}
+
 export type TestCommandPayload =
   | { cmd: 'set_seed'; args: { seed: number } }
   | { cmd: 'set_score'; args: ScorePatch }
-  | { cmd: 'set_takeover'; args: { playerIndex: PlayerIndex; value: number } }
   | { cmd: 'trigger_hawkeye'; args: { inBounds: boolean; distCm: number; line?: 'sideline' | 'baseline' } }
+  | { cmd: 'spawn_incoming_ball'; args: SpawnIncomingBallOptions }
   | { cmd: 'fast_forward_pause'; args: { seconds: number } };
+
+export interface InputDiagnostics {
+  attached: boolean;
+  pressedCount: number;
+  rebindCount: number;
+  lastResetReason: string | null;
+}
+
+export interface TestStateSnapshot {
+  mode: 'lobby' | 'single' | 'online';
+  yourSide: PlayerSide;
+  roomCode: string | null;
+  wsConnected: boolean;
+  reconnectCount: number;
+  rttMs: number;
+  matchState: MatchState | null;
+  avatarLoaded: boolean;
+  avatarSource: 'glb' | 'fallback';
+  avatarTriangles: number;
+  qualityTier: 'HIGH' | 'MEDIUM' | 'LOW';
+  activeDpr: number;
+  estHz: number;
+  fpsCapEnabled: boolean;
+  upgradeCount: number;
+  fps: number;
+  maxFrameMs: number;
+  drawCalls: number;
+  inputDiagnostics: InputDiagnostics;
+}
 
 export type GameEvent =
   | {
@@ -271,8 +308,6 @@ export type GameEvent =
       reason: 'ace' | 'winner' | 'unforced_error' | 'double_fault' | 'out' | 'net' | 'double_bounce';
       score: ScoreState;
     }
-  | { type: 'TAKEOVER_ON'; player: PlayerIndex }
-  | { type: 'TAKEOVER_OFF'; player: PlayerIndex }
   | { type: 'PAUSE_TIMEOUT_RESUMING'; resumeCountdownSec: number }
   | { type: 'PAUSE_RESUMED'; serverTick: number }
   | {
@@ -377,29 +412,3 @@ export type ServerMessage =
   | { type: 'REMATCH_STATUS'; payload: { requested: [boolean, boolean] } }
   | { type: 'PONG'; payload: { clientTime: number; serverTick: number } }
   | { type: 'ERROR'; payload: { code: ErrorCode; message: string } };
-
-export interface InputDiagnostics {
-  attached: boolean;
-  pressedCount: number;
-  rebindCount: number;
-  lastResetReason: string | null;
-}
-
-export interface TestStateSnapshot {
-  mode: 'lobby' | 'single' | 'online';
-  yourSide: PlayerSide;
-  roomCode: string | null;
-  wsConnected: boolean;
-  reconnectCount: number;
-  rttMs: number;
-  matchState: MatchState | null;
-  qualityTier: 'HIGH' | 'MEDIUM' | 'LOW';
-  activeDpr: number;
-  estHz: number;
-  fpsCapEnabled: boolean;
-  upgradeCount: number;
-  fps: number;
-  maxFrameMs: number;
-  drawCalls: number;
-  inputDiagnostics: InputDiagnostics;
-}

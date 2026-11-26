@@ -1,5 +1,5 @@
 import { COURT_DIM } from './constants.js';
-import { cloneMatchState } from './mirror.js';
+import { cloneMatchState, cloneVec3 } from './mirror.js';
 import type {
   KeyPointLabel,
   MatchFormat,
@@ -19,27 +19,27 @@ export function createEmptyStats(): PlayerMatchStats {
     firstServesTotal: 0,
     winners: 0,
     unforcedErrors: 0,
-    perfectShots: 0,
-    totalMeterShots: 0,
+    cleanShots: 0,
+    totalShots: 0,
   };
 }
 
 /**
- * Compute integer percentages (0-100) for first serve % and perfect shot %.
+ * Compute integer percentages (0-100) for first serve % and CLEAN sweet-spot shot %.
  */
 export function computeStatsSummary(stats: PlayerMatchStats): {
   firstServePct: number;
-  perfectPct: number;
+  cleanPct: number;
 } {
   const firstServePct =
     stats.firstServesTotal <= 0
       ? 0
       : Math.round((stats.firstServesIn / stats.firstServesTotal) * 100);
-  const perfectPct =
-    stats.totalMeterShots <= 0
+  const cleanPct =
+    stats.totalShots <= 0
       ? 0
-      : Math.round((stats.perfectShots / stats.totalMeterShots) * 100);
-  return { firstServePct, perfectPct };
+      : Math.round((stats.cleanShots / stats.totalShots) * 100);
+  return { firstServePct, cleanPct };
 }
 
 export function computeCourtSide(points: [number, number]): 'deuce' | 'ad' {
@@ -83,7 +83,7 @@ export function computeKeyPointLabel(score: ScoreState): KeyPointLabel {
   }
 
   if (isTiebreak) {
-    return 'TIEBREAK';
+    return format === 'super_tiebreak' ? 'SUPER_TIEBREAK' : 'TIEBREAK';
   }
 
   return 'NONE';
@@ -115,7 +115,7 @@ export function createInitialScoreState(format: MatchFormat): ScoreState {
     server: 0,
     serveNumber: 1,
     courtSide: 'deuce',
-    keyPointLabel: format === 'super_tiebreak' ? 'TIEBREAK' : 'NONE',
+    keyPointLabel: format === 'super_tiebreak' ? 'SUPER_TIEBREAK' : 'NONE',
     winner: null,
   };
   return refreshScoreMetadata(base);
@@ -161,7 +161,6 @@ export function awardPointToScore(score: ScoreState, winner: PlayerIndex): Score
 
   // Fast4 regular game
   if (next.isDecidingPoint || (next.points[winner] >= 3 && next.points[loser] < 3)) {
-    // Game won
     next.games[winner] += 1;
     next.points = [0, 0];
     next.isDecidingPoint = false;
@@ -191,9 +190,6 @@ export function computeServeSetupPositions(score: ScoreState): {
 } {
   const serverSide = score.server === 0 ? 1 : -1;
   const receiverSide = -serverSide;
-  // Server stands on right of own view for deuce, left for ad:
-  // For side = +1: right = +x, left = -x -> x = side * (deuce ? +1 : -1) * offset
-  // For side = -1: local right = -x (world), local left = +x (world) -> x = side * (deuce ? +1 : -1) * offset
   const sideSign = score.courtSide === 'deuce' ? 1 : -1;
   const serverX = serverSide * sideSign * 1.45;
   const receiverX = receiverSide * sideSign * 2.15;
@@ -231,11 +227,10 @@ export function applyScorePatch(state: MatchState, patch: ScorePatch): MatchStat
 
   const { serverPos, receiverPos } = computeServeSetupPositions(next.score);
   const srvIdx = next.score.server;
-  const rcvIdx = (1 - srvIdx) as PlayerIndex;
 
   for (const idx of [0, 1] as const) {
     const p = next.players[idx];
-    p.pos = idx === srvIdx ? serverPos : receiverPos;
+    p.pos = idx === srvIdx ? cloneVec3(serverPos) : cloneVec3(receiverPos);
     p.vel = { x: 0, y: 0, z: 0 };
     p.yaw = p.side === 1 ? 0 : Math.PI;
     p.anim = 'idle';
@@ -243,9 +238,14 @@ export function applyScorePatch(state: MatchState, patch: ScorePatch): MatchStat
     p.isSliding = false;
     p.slideTimer = 0;
     p.moveAccelTime = 0;
-    p.meter.active = false;
-    p.meter.action = 'none';
-    p.meter.progress = 0;
+    p.stance = {
+      armedAction: 'none',
+      holdDurationSec: 0,
+      bufferRemainingSec: 0,
+      lastConsumedHitTick: -1,
+      lockedAimX: 0,
+      lastQuality: null,
+    };
   }
 
   next.phase = 'serve_ready';
