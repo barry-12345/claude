@@ -1,0 +1,21 @@
+{
+  "round": "v1.1-round-2",
+  "candidateCommit": "cb5e2f1a1626f0235d146a0ddd99f892a224bb49",
+  "baseCommit": "4e442b65ce4a047a61caab99530d465736e3cca5",
+  "branch": "v1-candy-td-battle",
+  "retestScope": "Targeted retest (Round 1 rework items #1/#2/#3 + adjacent NetClient disconnect/reconnect path) + full npm test suite",
+  "npmTest": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "durationMs": 1882.55,
+    "includesNewAssertions": [
+      "AC-16 step 5: stale timed-out socket late close does not clobber active connection",
+      "AC-16 step 6: synchronous throw in new WebSocket() rejects cleanly without TDZ ReferenceError"
+    ]
+  },
+  "modifiedStaticAssetsHttpCheckPort4101": {
+    "indexHtml": { "rawContentLength": 11775, "rawMatch": true, "gzipContentLength": 4122, "gzipMatch": true, "transferEncoding": null },
+    "styleCss": { "gzipContentLength": 4137, "gzipMatch": true, "transferEncoding": null }
+  }
+}

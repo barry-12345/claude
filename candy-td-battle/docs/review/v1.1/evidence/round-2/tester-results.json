@@ -1,0 +1,136 @@
+{
+  "timestamp": "2026-11-26T03:19:17.568Z",
+  "serverPid": 24444,
+  "healthz": {
+    "ok": true,
+    "allowTestHooks": false
+  },
+  "cases": {
+    "R2-T01": {
+      "typeofCandyTest": "undefined",
+      "faviconPresent": true,
+      "domInfo": {
+        "toastText": "请输入 4 位房间码",
+        "toastRect": {
+          "x": 570.265625,
+          "y": 68,
+          "width": 139.46875,
+          "height": 32,
+          "top": 68,
+          "right": 709.734375,
+          "bottom": 100,
+          "left": 570.265625
+        },
+        "toastContainerZIndex": "100",
+        "toastContainerPointerEvents": "none",
+        "toastItemBg": "rgba(74, 53, 72, 0.9)",
+        "toastItemColor": "rgb(255, 255, 255)",
+        "lobbyOverlayZIndex": "50",
+        "lobbyOverlayBackdropFilter": "blur(6px)"
+      },
+      "consoleErrorCount": 0,
+      "consoleErrors": [],
+      "pageErrorCount": 0,
+      "pageErrors": []
+    },
+    "R2-T02": {
+      "duringConnectButtons": [
+        {
+          "id": "btn-create-pvp",
+          "disabled": true,
+          "text": "连接中..."
+        },
+        {
+          "id": "btn-join-pvp",
+          "disabled": true,
+          "text": "连接中..."
+        },
+        {
+          "id": "btn-ai-casual",
+          "disabled": true,
+          "text": "连接中..."
+        },
+        {
+          "id": "btn-ai-clever",
+          "disabled": true,
+          "text": "连接中..."
+        }
+      ],
+      "upgradeCountDuringHang": 1,
+      "failToastInfo": {
+        "toastText": "连接对战服务器超时，请检查服务状态、网络或代理设置后重试",
+        "toastContainerZIndex": "100",
+        "lobbyOverlayZIndex": "50",
+        "buttonsAfterTimeout": [
+          {
+            "id": "btn-create-pvp",
+            "disabled": false,
+            "text": "创建双人房间"
+          },
+          {
+            "id": "btn-join-pvp",
+            "disabled": false,
+            "text": "加入房间"
+          },
+          {
+            "id": "btn-ai-casual",
+            "disabled": false,
+            "text": "🌸 休闲甜心 AI"
+          },
+          {
+            "id": "btn-ai-clever",
+            "disabled": false,
+            "text": "🦊 狡黠狐狸 AI"
+          }
+        ]
+      },
+      "goldBeforeTower": "$320",
+      "goldAfterTower": "$240",
+      "goldAfterReload": "$240",
+      "oppNameAfterReload": "休闲甜心 AI",
+      "wsCountBeforeDrop": 3,
+      "wsCountAfterDrop": 4,
+      "disconnectToastText": [
+        "网络连接已断开，正在尝试自动重连..."
+      ],
+      "playingAfterWsDrop": {
+        "topBarVisible": true,
+        "lobbyHidden": true,
+        "gold": "$240",
+        "wave": "开战准备 · 3s"
+      },
+      "consoleErrorCount": 0,
+      "consoleErrors": [],
+      "pageErrorCount": 0,
+      "pageErrors": []
+    },
+    "R2-T03": {
+      "fileInfo": {
+        "protocol": "file:",
+        "hasHiddenClass": false,
+        "computedDisplay": "block",
+        "warningText": "⚠️ 请通过 HTTP 服务（如 npm start）打开，不支持直接双击本地 HTML 文件。",
+        "buttons": [
+          {
+            "id": "btn-create-pvp",
+            "disabled": true
+          },
+          {
+            "id": "btn-join-pvp",
+            "disabled": true
+          },
+          {
+            "id": "btn-ai-casual",
+            "disabled": true
+          },
+          {
+            "id": "btn-ai-clever",
+            "disabled": true
+          }
+        ]
+      },
+      "pageErrorCount": 0,
+      "pageErrors": []
+    }
+  }
+}

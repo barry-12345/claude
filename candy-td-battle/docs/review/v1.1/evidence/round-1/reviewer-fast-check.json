@@ -1,0 +1,40 @@
+{
+  "round": "v1.1-round-1",
+  "candidateCommit": "4e442b65ce4a047a61caab99530d465736e3cca5",
+  "branch": "v1-candy-td-battle",
+  "npmTest": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "durationMs": 1422.21
+  },
+  "httpStaticAndGzipProbePort4101": {
+    "allPassed": true,
+    "checkedRoutes": [
+      { "path": "/", "rawBytes": 11241, "gzipBytes": 3839, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/css/style.css", "rawBytes": 16959, "gzipBytes": 4137, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/js/main.js", "rawBytes": 9667, "gzipBytes": 3080, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/js/net-client.js", "rawBytes": 6813, "gzipBytes": 1887, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/js/ui.js", "rawBytes": 20927, "gzipBytes": 5569, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/js/audio.js", "rawBytes": 4947, "gzipBytes": 1302, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/js/renderer.js", "rawBytes": 34649, "gzipBytes": 8740, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/js/input.js", "rawBytes": 4819, "gzipBytes": 1400, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/js/shared/constants.js", "rawBytes": 14204, "gzipBytes": 4380, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/candytd/", "rawBytes": 11241, "gzipBytes": 3839, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/candytd/js/main.js", "rawBytes": 9667, "gzipBytes": 3080, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/candytd/js/shared/constants.js", "rawBytes": 14204, "gzipBytes": 4380, "transferEncoding": null, "vary": "Accept-Encoding" },
+      { "path": "/healthz", "rawBytes": 34, "gzipBytes": 54, "transferEncoding": null, "vary": "Accept-Encoding" }
+    ]
+  },
+  "wsHandshakeAndRaceProbe": {
+    "timeout150msOnHangingPort4102": "Error: WS_CONNECT_TIMEOUT",
+    "retryToHealthyPort4101AfterTimeout": { "connected": true, "readyState": 1, "pingTimerActive": true },
+    "upgrade502OnPort4103": "Error: WS_CONNECT_ERROR",
+    "immediateRetryToHealthyPort4101After502": { "connected": true, "readyState": 1, "pingTimerActive": true },
+    "codeAuditNotes": [
+      "public/css/style.css: .toast-container has z-index: 40 while .modal-overlay (#lobby-overlay) has z-index: 50 with backdrop-filter: blur(6px) and rgba(255,238,245,0.72) — needs real browser visual check in AC-17",
+      "public/js/net-client.js:81: failConnect references const promise inside new Promise executor (TDZ ReferenceError if new WebSocket throws synchronously)",
+      "public/js/net-client.js:144-152: close listener mutates this.connected/pingTimer/onConnectionChange without guarding this.ws === ws"
+    ]
+  }
+}

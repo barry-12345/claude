@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>糖果塔防对战 · Candy TD Battle</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🍬</text></svg>" />
   <link rel="stylesheet" href="./css/style.css" />
 </head>
 <body>
@@ -121,6 +122,9 @@
 
           <!-- Entry View -->
           <div id="lobby-entry" class="lobby-section">
+            <div id="file-protocol-warning" class="file-protocol-warning hidden">
+              ⚠️ 请通过 HTTP 服务（如 <code>npm start</code>）打开，不支持直接双击本地 HTML 文件。
+            </div>
             <div class="nick-row">
               <label for="input-nickname">我的昵称</label>
               <input id="input-nickname" type="text" maxlength="20" placeholder="草莓甜心" value="草莓甜心" />
@@ -236,6 +240,16 @@
     </div>
   </div>
 
+  <script>
+    if (location.protocol === 'file:') {
+      var warn = document.getElementById('file-protocol-warning');
+      if (warn) warn.classList.remove('hidden');
+      ['btn-create-pvp', 'btn-join-pvp', 'btn-ai-casual', 'btn-ai-clever'].forEach(function (id) {
+        var btn = document.getElementById(id);
+        if (btn) btn.disabled = true;
+      });
+    }
+  </script>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

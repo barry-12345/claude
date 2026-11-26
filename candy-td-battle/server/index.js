@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import { RoomManager } from './room-manager.js';
 
@@ -18,6 +19,39 @@ const MIME_TYPES = {
   '.png': 'image/png',
   '.ico': 'image/x-icon'
 };
+
+const COMPRESSIBLE_EXTS = new Set(['.html', '.css', '.js', '.json', '.svg']);
+
+function acceptsGzip(req) {
+  const header = req.headers['accept-encoding'];
+  if (!header) return false;
+  const value = Array.isArray(header) ? header.join(',') : String(header);
+  return /\bgzip\b/i.test(value);
+}
+
+function sendFixedResponse(req, res, statusCode, contentType, rawBody, { compressible = false, extraHeaders = {} } = {}) {
+  const bodyBuf = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
+  const headers = {
+    'Content-Type': contentType,
+    ...extraHeaders
+  };
+
+  if (compressible) {
+    headers.Vary = 'Accept-Encoding';
+    if (acceptsGzip(req)) {
+      const gzBuf = zlib.gzipSync(bodyBuf);
+      headers['Content-Encoding'] = 'gzip';
+      headers['Content-Length'] = gzBuf.length;
+      res.writeHead(statusCode, headers);
+      res.end(gzBuf);
+      return;
+    }
+  }
+
+  headers['Content-Length'] = bodyBuf.length;
+  res.writeHead(statusCode, headers);
+  res.end(bodyBuf);
+}
 
 export function createCandyServer(options = {}) {
   const port = Number(options.port ?? process.env.PORT ?? 3000);
@@ -36,8 +70,14 @@ export function createCandyServer(options = {}) {
 
       // Healthcheck endpoint
       if (reqPath === '/healthz' || reqPath.endsWith('/healthz')) {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, allowTestHooks }));
+        sendFixedResponse(
+          req,
+          res,
+          200,
+          'application/json; charset=utf-8',
+          JSON.stringify({ ok: true, allowTestHooks }),
+          { compressible: true, extraHeaders: { 'Cache-Control': 'no-cache' } }
+        );
         return;
       }
 
@@ -48,15 +88,13 @@ export function createCandyServer(options = {}) {
       // Normalize relative path & block directory traversal
       const cleanRel = path.posix.normalize(reqPath).replace(/^\/+/, '');
       if (cleanRel.startsWith('..') || cleanRel.includes('\0')) {
-        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Forbidden');
+        sendFixedResponse(req, res, 403, 'text/plain; charset=utf-8', 'Forbidden');
         return;
       }
 
       let filePath = path.resolve(PUBLIC_DIR, cleanRel);
       if (!filePath.startsWith(PUBLIC_DIR)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Forbidden');
+        sendFixedResponse(req, res, 403, 'text/plain; charset=utf-8', 'Forbidden');
         return;
       }
 
@@ -79,18 +117,15 @@ export function createCandyServer(options = {}) {
 
       const data = await fs.readFile(filePath);
       const ext = path.extname(filePath).toLowerCase();
-      res.writeHead(200, {
-        'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
-        'Cache-Control': 'no-cache'
+      sendFixedResponse(req, res, 200, MIME_TYPES[ext] || 'application/octet-stream', data, {
+        compressible: COMPRESSIBLE_EXTS.has(ext),
+        extraHeaders: { 'Cache-Control': 'no-cache' }
       });
-      res.end(data);
     } catch (err) {
       if (err && err.code === 'ENOENT') {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Not Found');
+        sendFixedResponse(req, res, 404, 'text/plain; charset=utf-8', 'Not Found');
       } else {
-        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Internal Server Error');
+        sendFixedResponse(req, res, 500, 'text/plain; charset=utf-8', 'Internal Server Error');
       }
     }
   });

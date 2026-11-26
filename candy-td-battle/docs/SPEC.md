@@ -333,3 +333,44 @@ AI 完全通过与真人玩家一致的 `applyPlayerAction(sim, aiPlayerIndex, a
 3. **本地服务与测试端口运行**：使用环境变量与指定端口段（默认 `PORT=3000`；流程隔离端口：Builder `3100–3199`、Reviewer `4100–4199`、Tester `4500–4599`）启停本地 Node HTTP/WS 服务完成自动化单测、协议集成测试与浏览器交互取证。
 4. **SSOT 与 Notion 归档**：以本 `docs/SPEC.md` 作为仓库执行副本，由调度员在 Notion `Personal / Quick Notes` 数据库创建「🍬 糖果塔防对战 · V1 规格与状态」版本页主本并回填页面链接。
 5. **严格未授权红线（V1 禁止自动执行）**：本轮**不执行**腾讯云生产服务器（`43.143.38.16:8080`）部署、**不执行**远端 GitHub 仓库创建或 `git push` 推送，上述外部动作须待 V1 验收通过后另行向用户请示确认。
+
+---
+
+## 8. V1.1 增量定稿规格：启动传输稳定性与大厅建连反馈修复
+
+- **版本与状态**：`V1.1`（中任务，返工上限 2 轮）｜ **已获用户批准**（`2026-11-26`，口令：`M2, 可以开始`）
+- **SSOT 归属**：Notion 版本页（`Personal / Quick Notes`「糖果塔防对战 · V1/V1.1 规格与状态」）为主本，本 `docs/SPEC.md` 第 8 节为同步执行副本。
+- **问题背景**：线上入口 `http://43.143.38.16:8080/candytd/` 在代理环境下复现 `net::ERR_INCOMPLETE_CHUNKED_ENCODING`（`server/index.js` 未设 `Content-Length` 且经 Nginx 二次 chunked gzip），导致任一 ES Module 截断后大厅按钮全部无响应；同时前端存在 WS 建连静默失败、`CONNECTING` 态并发 `connect()` 竞态丢消息、以及 `CandyAudio` 构造未对 `sessionStorage` 容错三处代码缺陷。
+
+### 8.1 范围边界（V1.1）
+- **In Scope（V1.1 必做）**：
+  1. **静态响应定长与预压缩（`server/index.js`）**：
+     - 所有静态文件响应显式设置 `'Content-Length': body.length`。
+     - 对可压缩静态文本类型（`.html`, `.css`, `.js`, `.json`, `.svg`）且请求头 `Accept-Encoding` 包含 `gzip` 时，由服务端直接 `zlib.gzipSync`（或缓存预压缩 Buffer）返回 `'Content-Encoding': 'gzip'`、`'Content-Length': gzBuf.length`、`'Vary': 'Accept-Encoding'`，避免前置 Nginx 二次 chunked 压缩导致代理下截断。
+     - 同步兼容非 gzip 请求返回原始 Buffer + 精确 `'Content-Length'`；`/healthz` 也返回明确 `Content-Length`。
+  2. **WebSocket 建连竞态与超时治理（`public/js/net-client.js`）**：
+     - 维护进行中的 `this._connectPromise`：当 `ws.readyState === WebSocket.CONNECTING` 时，并发调用 `connect()` 必须返回同一 Promise 并真正等到 `open` 触发后再 resolve，杜绝提前 resolve 导致后续 `send()` 静默丢弃 `create_room` / `join_room`。
+     - 增加建连超时（默认 `6000ms`，支持 `connect({ timeoutMs })` 覆写），超时后主动关闭并 reject 明确错误（`WS_CONNECT_TIMEOUT`）；`close` 先于 `open` 发生时同样 reject 并清空 `this.ws` / `this._connectPromise`，确保用户可再次点击重试。
+  3. **大厅按钮可见反馈、防重入与 `file://` 提示（`public/js/main.js`、`public/js/ui.js`）**：
+     - `onCreateRoom` / `onJoinRoom` 全程包裹 `try / catch / finally`：点击后大厅按钮进入连接中禁用态并展示清晰反馈（如 Toast 或按钮文案「连接中...」），建连失败或超时立即弹出可读中文 Toast（提示无法连接对战服务器，建议检查服务状态/网络或代理设置）并恢复按钮可用。
+     - 当 `location.protocol === 'file:'` 时，大厅入口显式提示「请通过 HTTP 服务（如 `npm start`）打开，不支持直接双击本地 HTML 文件」。
+  4. **音频模块存储容错（`public/js/audio.js`）**：
+     - 构造函数读取 `sessionStorage` 与 `setMuted()` 写入 `sessionStorage` 均包裹 `try / catch`，在受限存储上下文（如 `SecurityError`）安全降级为内存状态，严禁阻塞后续 `CandyUI` 绑定按钮事件。
+  5. **自动化回归测试（`tests/ws-protocol.test.js` 等）**：
+     - 新增针对 `AC-15`、`AC-16`、`AC-18` 的自动化断言，并保证原有 `npm test` 12/12 全部通过。
+- **Out of Scope（V1.1 不做）**：
+  - 不改动游戏地图、塔防数值、派怪/快递/假动作/加时赛核心玩法逻辑。
+  - **高风险外部动作暂不自动执行**：不执行远端 GitHub `git push`、不自动 SSH 部署至 `43.143.38.16:8080`（V1.1 验收 `PASS` 后另行请示用户确认）。
+
+### 8.2 V1.1 可测试验收表（交付门槛）
+| 编号 | 风险 | 初始条件 | 操作步骤 | 预期结果 | 所需证据 | 推荐验证方式 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **AC-15** | 高 | 启动本地 `candy-td-battle` 服务 | 分别携带与不携带 `Accept-Encoding: gzip` 请求 `/`、`/css/style.css`、`/js/main.js`、`/js/renderer.js` 与 `/healthz` | 全部返回 HTTP 200，响应头均带精确 `Content-Length` 且不含 `Transfer-Encoding: chunked`；gzip 响应带 `Content-Encoding: gzip` 与 `Vary: Accept-Encoding`，解压后与源文件逐字节一致 | 自动化测试输出（打印 headers 与字节比对） | **脚本自动测** |
+| **AC-16** | 高 | 单元测试 / 本地 WS 桩 | 1) 模拟延迟握手的 WS，连续并发调用两次 `net.connect()` 并在 resolve 后立即 `send()`；<br>2) 指向不可达/挂起端口调用 `connect({ timeoutMs: 300 })`；<br>3) 失败后恢复合法端点再次 `connect()` | 1) 两次调用均等待真正 `OPEN` 后才 resolve，`send()` 返回 `true` 且服务端均收到消息；<br>2) 失败/超时按预期 reject 并清理内部状态；<br>3) 随后重连成功 | 自动化单测/集成测试通过日志 | **脚本自动测** |
+| **AC-17** | 高 | 正常启动服务（无 `?test=1`），独立浏览器会话 | 1) 正常入口输入昵称 `barry`，空房间码点「加入房间」；<br>2) 点「🌸 休闲甜心 AI」进入倒计时并进入 `PLAYING`；返回大厅再点「创建双人房间」验证生成 4 位房码；<br>3) 阻断 `/ws` 握手（或关闭后端）后在大厅点「🌸 休闲甜心 AI」/「创建双人房间」 | 1) 空码弹出中文提示 Toast；<br>2) AI 局与双人建房均正常进入，控制台 0 报错；<br>3) WS 失败时出现可读中文错误 Toast，且按钮恢复可再次点击，不出现静默卡死 | 关键帧截图（正常大厅/进局/断连报错 Toast）+ 浏览器 Console 日志 | **Tester 交互实操** |
+| **AC-18** | 中 | 自动化单测 + 全量回归 | 1) 在 `sessionStorage.getItem/setItem` 抛出 `SecurityError` 条件下实例化 `CandyAudio` 并调用 `toggleMute()`；<br>2) 运行全套 `npm test` | 1) `CandyAudio` 无异常抛出，静音状态在内存中正确切换；<br>2) 原有 12 项 + 新增 V1.1 回归用例全部通过，0 失败 | `npm test` 全量输出 + 代码审 | **脚本自动测** + **Reviewer 代码审** |
+
+- **成功指标（交付后效果验证，非本轮交付门禁）**：部署至 `http://43.143.38.16:8080/candytd/` 后，用户在 Mac 浏览器（含开启 VPN 代理场景）打开大厅点击任意按钮均稳定响应，无静默卡死。
+
+### 8.3 旧证据有效性说明
+- V1 Round 2 评审中 `AC-01 ~ AC-14` 核心玩法、仿真与双端渲染证据仍有效；本轮改动涉及 `server/index.js`（静态文件响应）、`public/js/net-client.js`、`public/js/main.js`、`public/js/ui.js`、`public/js/audio.js`，需重点回归大厅入口、WS 建连/重连、静音持久化及子路径代理（`AC-01 / AC-10 / AC-11 / AC-14` + 新增 `AC-15 ~ AC-18`）。

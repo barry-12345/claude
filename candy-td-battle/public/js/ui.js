@@ -41,6 +41,7 @@ export class CandyUI {
     this.elTowerPopover = this.$('tower-popover');
     this.elLobbyOverlay = this.$('lobby-overlay');
     this.elLobbyEntry = this.$('lobby-entry');
+    this.elFileProtocolWarning = this.$('file-protocol-warning');
     this.elLobbyRoom = this.$('lobby-room');
     this.elLobbyCountdown = this.$('lobby-countdown');
     this.elReconnectOverlay = this.$('reconnect-overlay');
@@ -238,6 +239,25 @@ export class CandyUI {
     setTimeout(() => {
       el.remove();
     }, durationMs);
+  }
+
+  setLobbyConnecting(connecting, label = '连接中...') {
+    const btnIds = ['btn-create-pvp', 'btn-join-pvp', 'btn-ai-casual', 'btn-ai-clever'];
+    for (const id of btnIds) {
+      const btn = this.$(id);
+      if (!btn) continue;
+      if (!btn.dataset.defaultText) {
+        btn.dataset.defaultText = btn.textContent;
+      }
+      btn.disabled = Boolean(connecting);
+      btn.textContent = connecting ? label : btn.dataset.defaultText;
+    }
+  }
+
+  showFileProtocolWarning() {
+    if (this.elFileProtocolWarning) {
+      this.elFileProtocolWarning.classList.remove('hidden');
+    }
   }
 
   setPeekBanner(active) {

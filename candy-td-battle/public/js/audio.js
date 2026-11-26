@@ -4,7 +4,11 @@ export class CandyAudio {
   constructor() {
     this.ctx = null;
     this.masterGain = null;
-    this.muted = sessionStorage.getItem(MUTE_KEY) === '1';
+    try {
+      this.muted = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(MUTE_KEY) === '1';
+    } catch {
+      this.muted = false;
+    }
     this.eventLog = [];
   }
 
@@ -30,7 +34,13 @@ export class CandyAudio {
 
   setMuted(muted) {
     this.muted = Boolean(muted);
-    sessionStorage.setItem(MUTE_KEY, this.muted ? '1' : '0');
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(MUTE_KEY, this.muted ? '1' : '0');
+      }
+    } catch {
+      // Fallback to in-memory mute state when storage is restricted
+    }
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setValueAtTime(this.muted ? 0 : 0.25, this.ctx.currentTime);
     }

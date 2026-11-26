@@ -1,0 +1,279 @@
+{
+  "timestamp": "2026-11-26T03:08:30.255Z",
+  "serverPid": 52088,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "T01": {
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "consoleWarnings": [],
+    "pageErrors": [],
+    "failedRequests": [],
+    "candyTestType": "undefined",
+    "domAndStyles": {
+      "toasts": [
+        {
+          "text": "请输入 4 位房间码",
+          "className": "toast-item",
+          "rect": {
+            "x": 570.265625,
+            "y": 68,
+            "width": 139.46875,
+            "height": 32,
+            "top": 68,
+            "right": 709.734375,
+            "bottom": 100,
+            "left": 570.265625
+          },
+          "computed": {
+            "opacity": "1",
+            "backgroundColor": "rgba(74, 53, 72, 0.9)",
+            "color": "rgb(255, 255, 255)"
+          }
+        }
+      ],
+      "topElementAtToast": {
+        "tag": "DIV",
+        "id": "lobby-overlay",
+        "className": "modal-overlay"
+      },
+      "toastContainer": {
+        "zIndex": "40",
+        "position": "absolute",
+        "rect": {
+          "x": 570.265625,
+          "y": 68,
+          "width": 139.46875,
+          "height": 32,
+          "top": 68,
+          "right": 709.734375,
+          "bottom": 100,
+          "left": 570.265625
+        }
+      },
+      "lobbyOverlay": {
+        "className": "modal-overlay",
+        "zIndex": "50",
+        "backdropFilter": "blur(6px)",
+        "backgroundColor": "rgba(255, 238, 245, 0.72)",
+        "display": "flex",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 720,
+          "top": 0,
+          "right": 1280,
+          "bottom": 720,
+          "left": 0
+        }
+      }
+    }
+  },
+  "T02": {
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "consoleWarnings": [],
+    "pageErrors": [],
+    "failedRequests": [],
+    "pvpRoom": {
+      "roomCode": "MXV6",
+      "slot0Name": "barry (我)",
+      "slot1Name": "等待好友加入..."
+    },
+    "aiFlow": {
+      "beforeBuild": {
+        "gold": "$320",
+        "muteBtn": "🔊"
+      },
+      "afterBuild": {
+        "gold": "$240"
+      },
+      "afterMute": {
+        "muteBtn": "🔇",
+        "sessionStorageData": {
+          "muted": "1",
+          "reconnectKeys": [
+            "candy_td_muted",
+            "candy_td_session_v1"
+          ]
+        }
+      },
+      "afterReload": {
+        "gold": "$240",
+        "muteBtn": "🔇",
+        "waveText": "开战准备 · 3s",
+        "oppName": "休闲甜心 AI"
+      }
+    }
+  },
+  "T03": {
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "consoleWarnings": [
+      "WebSocket connection to 'ws://127.0.0.1:4502/ws' failed: WebSocket is closed before the connection is established."
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "buttonsInitial": [
+      {
+        "id": "btn-create-pvp",
+        "disabled": false,
+        "text": "创建双人房间"
+      },
+      {
+        "id": "btn-join-pvp",
+        "disabled": false,
+        "text": "加入房间"
+      },
+      {
+        "id": "btn-ai-casual",
+        "disabled": false,
+        "text": "🌸 休闲甜心 AI"
+      },
+      {
+        "id": "btn-ai-clever",
+        "disabled": false,
+        "text": "🦊 狡黠狐狸 AI"
+      }
+    ],
+    "wsUpgradeAttemptsDuringHang": 1,
+    "buttonsDuringConnect": [
+      {
+        "id": "btn-create-pvp",
+        "disabled": true,
+        "text": "连接中..."
+      },
+      {
+        "id": "btn-join-pvp",
+        "disabled": true,
+        "text": "连接中..."
+      },
+      {
+        "id": "btn-ai-casual",
+        "disabled": true,
+        "text": "连接中..."
+      },
+      {
+        "id": "btn-ai-clever",
+        "disabled": true,
+        "text": "连接中..."
+      }
+    ],
+    "toastAndOverlay": {
+      "toasts": [
+        {
+          "text": "连接对战服务器超时，请检查服务状态、网络或代理设置后重试",
+          "className": "toast-item",
+          "rect": {
+            "x": 442,
+            "y": 68,
+            "width": 396,
+            "height": 32,
+            "top": 68,
+            "right": 838,
+            "bottom": 100,
+            "left": 442
+          },
+          "computed": {
+            "opacity": "1",
+            "backgroundColor": "rgba(74, 53, 72, 0.9)",
+            "color": "rgb(255, 255, 255)"
+          }
+        }
+      ],
+      "topElementAtToast": {
+        "tag": "DIV",
+        "id": "lobby-overlay",
+        "className": "modal-overlay"
+      },
+      "toastContainer": {
+        "zIndex": "40",
+        "position": "absolute",
+        "rect": {
+          "x": 442,
+          "y": 68,
+          "width": 396,
+          "height": 32,
+          "top": 68,
+          "right": 838,
+          "bottom": 100,
+          "left": 442
+        }
+      },
+      "lobbyOverlay": {
+        "className": "modal-overlay",
+        "zIndex": "50",
+        "backdropFilter": "blur(6px)",
+        "backgroundColor": "rgba(255, 238, 245, 0.72)",
+        "display": "flex",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 720,
+          "top": 0,
+          "right": 1280,
+          "bottom": 720,
+          "left": 0
+        }
+      }
+    },
+    "buttonsAfterFail": [
+      {
+        "id": "btn-create-pvp",
+        "disabled": false,
+        "text": "创建双人房间"
+      },
+      {
+        "id": "btn-join-pvp",
+        "disabled": false,
+        "text": "加入房间"
+      },
+      {
+        "id": "btn-ai-casual",
+        "disabled": false,
+        "text": "🌸 休闲甜心 AI"
+      },
+      {
+        "id": "btn-ai-clever",
+        "disabled": false,
+        "text": "🦊 狡黠狐狸 AI"
+      }
+    ],
+    "recoveredInPlace": {
+      "waitingVisible": true,
+      "roomCode": "QHV4"
+    }
+  },
+  "T04": {
+    "consoleErrors": [
+      "Access to script at 'file:///G:/%E6%88%91%E7%9A%84%E4%BA%91%E7%AB%AF%E7%A1%AC%E7%9B%98/%E6%B8%B8%E6%88%8F/candy-td-battle/public/js/main.js' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome-experimental-site-token-provider, chrome-extension, chrome-untrusted, data, edge, http, https, isolated-app.",
+      "Failed to load resource: net::ERR_FAILED"
+    ],
+    "consoleWarnings": [],
+    "pageErrors": [],
+    "failedRequests": [
+      {
+        "url": "file:///G:/%E6%88%91%E7%9A%84%E4%BA%91%E7%AB%AF%E7%A1%AC%E7%9B%98/%E6%B8%B8%E6%88%8F/candy-td-battle/public/js/main.js",
+        "errorText": "net::ERR_FAILED"
+      }
+    ],
+    "fileWarning": {
+      "className": "file-protocol-warning hidden",
+      "hasHiddenClass": true,
+      "display": "none",
+      "visibility": "visible",
+      "text": "⚠️ 请通过 HTTP 服务（如 npm start）打开，不支持直接双击本地 HTML 文件。"
+    }
+  },
+  "healthz": {
+    "ok": true,
+    "allowTestHooks": false
+  }
+}

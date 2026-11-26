@@ -4,6 +4,7 @@ export class NetClient {
   constructor() {
     this.ws = null;
     this.connected = false;
+    this._connectPromise = null;
     this.rttMs = 0;
     this.serverTickMs = 0;
     this.pingTimer = null;
@@ -52,15 +53,77 @@ export class NetClient {
     return `${wsProto}//${location.host}${basePath}ws`;
   }
 
-  connect() {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+  connect({ timeoutMs = 6000 } = {}) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       return Promise.resolve();
     }
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(this.getWsUrl());
+    if (this._connectPromise && this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      return this._connectPromise;
+    }
+
+    let promise;
+    promise = new Promise((resolve, reject) => {
+      let ws;
+      let settled = false;
+      let connectTimer = null;
+
+      const clearConnectTimer = () => {
+        if (connectTimer !== null) {
+          clearTimeout(connectTimer);
+          connectTimer = null;
+        }
+      };
+
+      const failConnect = (err) => {
+        if (settled) return;
+        settled = true;
+        clearConnectTimer();
+        this.connected = false;
+        if (this._connectPromise === promise) {
+          this._connectPromise = null;
+        }
+        if (this.ws === ws) {
+          this.ws = null;
+        }
+        try {
+          if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+            ws.close();
+          }
+        } catch {
+          // ignore close errors during cleanup
+        }
+        reject(err instanceof Error ? err : new Error(String(err || 'WS_CONNECT_ERROR')));
+      };
+
+      try {
+        ws = new WebSocket(this.getWsUrl());
+      } catch (err) {
+        failConnect(err);
+        return;
+      }
+
       this.ws = ws;
 
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        connectTimer = setTimeout(() => {
+          failConnect(new Error('WS_CONNECT_TIMEOUT'));
+        }, timeoutMs);
+      }
+
       ws.addEventListener('open', () => {
+        if (settled) {
+          try {
+            ws.close();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        settled = true;
+        clearConnectTimer();
+        if (this._connectPromise === promise) {
+          this._connectPromise = null;
+        }
         this.connected = true;
         this.handlers.onConnectionChange(true);
         this._startPing();
@@ -78,15 +141,31 @@ export class NetClient {
       });
 
       ws.addEventListener('close', () => {
-        this.connected = false;
-        this._stopPing();
-        this.handlers.onConnectionChange(false);
+        const isCurrentWs = this.ws === ws;
+        if (isCurrentWs) {
+          this.connected = false;
+          this._stopPing();
+          this.ws = null;
+        }
+        if (!settled) {
+          failConnect(new Error('WS_CONNECT_CLOSED'));
+        }
+        if (isCurrentWs) {
+          this.handlers.onConnectionChange(false);
+        }
       });
 
       ws.addEventListener('error', (err) => {
-        if (!this.connected) reject(err);
+        if (!settled) {
+          failConnect(err instanceof Error ? err : new Error('WS_CONNECT_ERROR'));
+        }
       });
     });
+
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      this._connectPromise = promise;
+    }
+    return promise;
   }
 
   _startPing() {

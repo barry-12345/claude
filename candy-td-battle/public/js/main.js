@@ -27,6 +27,14 @@ const renderer = new CandyRenderer(canvas);
 
 let latestRoomState = null;
 let matchEndAudioPlayed = false;
+let lobbyConnecting = false;
+
+function formatConnectError(err) {
+  if (err && err.message === 'WS_CONNECT_TIMEOUT') {
+    return '连接对战服务器超时，请检查服务状态、网络或代理设置后重试';
+  }
+  return '无法连接对战服务器，请检查服务状态、网络或代理设置';
+}
 
 function maybePlayMatchEndAudio(endedResult) {
   if (matchEndAudioPlayed || !endedResult) return;
@@ -41,14 +49,40 @@ const ui = new CandyUI({
   renderer,
   callbacks: {
     async onCreateRoom({ mode, aiDifficulty, nickname }) {
-      await net.connect();
-      net.saveSession({ nickname });
-      net.send({ type: 'create_room', mode, aiDifficulty, nickname });
+      if (lobbyConnecting) return;
+      lobbyConnecting = true;
+      ui.setLobbyConnecting(true, '连接中...');
+      try {
+        await net.connect();
+        net.saveSession({ nickname });
+        const sent = net.send({ type: 'create_room', mode, aiDifficulty, nickname });
+        if (!sent) {
+          ui.showToast('连接尚未就绪，请重试');
+        }
+      } catch (err) {
+        ui.showToast(formatConnectError(err), 3400);
+      } finally {
+        lobbyConnecting = false;
+        ui.setLobbyConnecting(false);
+      }
     },
     async onJoinRoom({ roomCode, nickname }) {
-      await net.connect();
-      net.saveSession({ nickname });
-      net.send({ type: 'join_room', roomCode, nickname });
+      if (lobbyConnecting) return;
+      lobbyConnecting = true;
+      ui.setLobbyConnecting(true, '连接中...');
+      try {
+        await net.connect();
+        net.saveSession({ nickname });
+        const sent = net.send({ type: 'join_room', roomCode, nickname });
+        if (!sent) {
+          ui.showToast('连接尚未就绪，请重试');
+        }
+      } catch (err) {
+        ui.showToast(formatConnectError(err), 3400);
+      } finally {
+        lobbyConnecting = false;
+        ui.setLobbyConnecting(false);
+      }
     },
     onSelectBuild(type) {
       renderer.selectedBuildType = type;
@@ -205,6 +239,12 @@ net.handlers.onConnectionChange = (connected) => {
   const saved = net.session;
   if (saved.nickname) {
     document.getElementById('input-nickname').value = saved.nickname;
+  }
+
+  if (location.protocol === 'file:') {
+    ui.showFileProtocolWarning();
+    ui.showLobbyHome();
+    return;
   }
 
   // Only attempt reconnect if same room (or no different ?room= invite override)

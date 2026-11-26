@@ -566,7 +566,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  z-index: 40;
+  z-index: 100;
   pointer-events: none;
 }
 
@@ -753,6 +753,29 @@ button {
 .btn-ghost:hover {
   transform: translateY(-1px);
   filter: brightness(1.03);
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-mint:disabled,
+.btn-peach:disabled,
+.btn-ghost:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.file-protocol-warning {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fff1f2;
+  border: 2px solid #fda4af;
+  color: #9f1239;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
 }
 
 .btn-primary {

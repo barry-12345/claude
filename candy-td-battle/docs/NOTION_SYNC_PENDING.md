@@ -24,6 +24,13 @@
 | 版本 | 任务类型 | 实际调用模型与档位 | 测试范围 | 可见用量 | 测试次数 | 返工轮数 | 已发现漏检 | 验收结论 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | V1 | 大任务（新游戏开发） | Planner `pro` / Builder `gemini-4-hydrogen-high` / Reviewer `gemini-4-neon-high` / Tester `gemini-4-hydrogen-high` | AC-01 ~ AC-14 | 账号级余量 94%（无法分摊） | 2（Round 1 Fast-Fail；Round 2 全量代码审 + 12/12 单测 + 双端 Edge CDP 7/7 场景实测） | 1 | Round 1 检出 5 项必修缺陷，Round 2 全部根因修复，漏检 0 | **PASS**（候选版本 `v1-candy-td-battle @ 7c8a7aa`，交付本地试玩） |
+| V1.1 | 中任务（启动传输稳定性与大厅建连反馈修复） | Builder `gemini-4-hydrogen-medium` / Reviewer `gemini-4-carbon-high` / Tester `gemini-4-hydrogen-medium` | AC-15 ~ AC-18 + 关联回归（AC-01/10/11/14） | 账号级余量 96%（无法分摊） | 2（Round 1 代码审+15/15 单测+Edge 4 场景；Round 2 定点复测 3/3 通过+15/15 单测） | 1 | Round 1 检出 2 项必修界面缺陷与 1 项建议，Round 2 全部根因修复，漏检 0 | **PASS**（候选版本 `v1-candy-td-battle @ cb5e2f1`，本地验收通过，待请示推送与部署） |
+
+## V1.1 规格摘要（2026-11-26 已获用户批准）
+- **变更原因**：线上 `http://43.143.38.16:8080/candytd/` 在代理下复现 `net::ERR_INCOMPLETE_CHUNKED_ENCODING` 截断脚本导致大厅所有按钮无响应，且前端存在 WS 建连失败静默无反馈、`CONNECTING` 态并发调用丢消息及 `CandyAudio` 读取 `sessionStorage` 无容错问题。
+- **核心改动**：`server/index.js`（静态文件显式 `Content-Length` + gzip 预压缩定长）、`public/js/net-client.js`（复用 `_connectPromise` 等 `OPEN` + `6000ms` 超时 + 可重试）、`public/js/main.js` & `public/js/ui.js`（连接中禁用态 + 失败中文 Toast + `file://` 提示）、`public/js/audio.js`（`sessionStorage` 容错）、`tests/ws-protocol.test.js`（AC-15 ~ AC-18 回归）。
+- **外部高风险动作**：V1.1 不自动执行 GitHub `git push` 或腾讯云 `43.143.38.16` 部署，验收 `PASS` 后另行请示用户确认。
+- **再次尝试写入 Notion 结果（2026-11-26）**：再次实测调用 `notion-create-pages`，仍触发客户端 `call_mcp_tool` 嵌套对象序列化缺陷（`pages.0` / `parent` 被序列化为 `null`），待后续客户端修复或人工/支持嵌套 MCP 的客户端同步。
 
 ## 评审结论摘要
 - **Round 1（2026-11-25）**：`FAIL`（Fast-Fail）— 检出双端特效串屏/P2 激光失效、假动作气泡错位、偷看浮卡重弹、热区边缘卡死、退房/倒计时重连缺陷及胜负音效未触发。

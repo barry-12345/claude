@@ -1,9 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createCandyServer } from '../server/index.js';
 import { ROOM_CODE_CHARS } from '../public/js/shared/constants.js';
+import { NetClient } from '../public/js/net-client.js';
+import { CandyAudio } from '../public/js/audio.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
 
 function connectWs(url) {
   return new Promise((resolve, reject) => {
@@ -434,5 +444,236 @@ test('Round-2 Regression: leave_room cleans LOBBY ghost, COUNTDOWN reconnect ini
     wsA.close();
     wsB.close();
     await srv.stop();
+  }
+});
+
+function rawHttpGet(port, reqPath, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: reqPath,
+        method: 'GET',
+        headers
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode,
+            headers: res.headers,
+            body: Buffer.concat(chunks)
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('AC-15: Static assets and /healthz return exact Content-Length without chunked encoding (raw & gzip)', async () => {
+  const srv = createCandyServer({ port: 0, allowTestHooks: false });
+  const port = await srv.start();
+
+  try {
+    const targets = [
+      { reqPath: '/', filePath: path.join(PUBLIC_DIR, 'index.html') },
+      { reqPath: '/css/style.css', filePath: path.join(PUBLIC_DIR, 'css', 'style.css') },
+      { reqPath: '/js/main.js', filePath: path.join(PUBLIC_DIR, 'js', 'main.js') },
+      { reqPath: '/js/renderer.js', filePath: path.join(PUBLIC_DIR, 'js', 'renderer.js') },
+      { reqPath: '/healthz', filePath: null }
+    ];
+
+    for (const { reqPath, filePath } of targets) {
+      const expectedRaw = filePath
+        ? await fs.readFile(filePath)
+        : Buffer.from(JSON.stringify({ ok: true, allowTestHooks: false }), 'utf8');
+
+      // 1. Without Accept-Encoding: gzip
+      const rawRes = await rawHttpGet(port, reqPath);
+      assert.equal(rawRes.status, 200, `${reqPath} raw status`);
+      assert.equal(rawRes.headers['transfer-encoding'], undefined, `${reqPath} raw must not be chunked`);
+      assert.equal(rawRes.headers['content-encoding'], undefined, `${reqPath} raw must not be gzip`);
+      assert.equal(Number(rawRes.headers['content-length']), rawRes.body.length, `${reqPath} raw Content-Length`);
+      assert.equal(Buffer.compare(rawRes.body, expectedRaw), 0, `${reqPath} raw byte match`);
+
+      // 2. With Accept-Encoding: gzip
+      const gzRes = await rawHttpGet(port, reqPath, { 'Accept-Encoding': 'gzip, deflate, br' });
+      assert.equal(gzRes.status, 200, `${reqPath} gzip status`);
+      assert.equal(gzRes.headers['transfer-encoding'], undefined, `${reqPath} gzip must not be chunked`);
+      assert.equal(gzRes.headers['content-encoding'], 'gzip', `${reqPath} gzip Content-Encoding`);
+      assert.match(String(gzRes.headers.vary || ''), /Accept-Encoding/i, `${reqPath} Vary header`);
+      assert.equal(Number(gzRes.headers['content-length']), gzRes.body.length, `${reqPath} gzip Content-Length`);
+      const unzipped = zlib.gunzipSync(gzRes.body);
+      assert.equal(Buffer.compare(unzipped, expectedRaw), 0, `${reqPath} gunzipped byte match`);
+    }
+  } finally {
+    await srv.stop();
+  }
+});
+
+test('AC-16: NetClient deduplicates concurrent connect(), rejects on timeout/close, and recovers on retry', async () => {
+  const prevWS = globalThis.WebSocket;
+  const prevLocation = globalThis.location;
+  const prevStorage = globalThis.sessionStorage;
+
+  const sentMessages = [];
+  const createdSockets = [];
+  let mode = 'slow_open';
+
+  class MockWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+
+    constructor(url) {
+      if (mode === 'sync_throw') {
+        throw new Error('WS_SYNC_CONSTRUCT_ERROR');
+      }
+      this.url = url;
+      this.readyState = MockWebSocket.CONNECTING;
+      this.listeners = new Map();
+      createdSockets.push(this);
+      if (mode === 'slow_open') {
+        setTimeout(() => {
+          if (this.readyState !== MockWebSocket.CONNECTING) return;
+          this.readyState = MockWebSocket.OPEN;
+          this._emit('open', {});
+        }, 50);
+      } else if (mode === 'fast_open') {
+        setTimeout(() => {
+          if (this.readyState !== MockWebSocket.CONNECTING) return;
+          this.readyState = MockWebSocket.OPEN;
+          this._emit('open', {});
+        }, 10);
+      } else if (mode === 'close_early') {
+        setTimeout(() => {
+          if (this.readyState !== MockWebSocket.CONNECTING) return;
+          this.readyState = MockWebSocket.CLOSED;
+          this._emit('close', {});
+        }, 20);
+      }
+    }
+
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(fn);
+    }
+
+    _emit(type, ev) {
+      for (const fn of this.listeners.get(type) || []) fn(ev);
+    }
+
+    send(data) {
+      sentMessages.push(JSON.parse(data));
+    }
+
+    close() {
+      this.readyState = MockWebSocket.CLOSED;
+    }
+  }
+
+  globalThis.WebSocket = MockWebSocket;
+  globalThis.location = { protocol: 'http:', host: '127.0.0.1:3100', pathname: '/' };
+  globalThis.sessionStorage = {
+    getItem: () => null,
+    setItem: () => {}
+  };
+
+  try {
+    const net = new NetClient();
+
+    // 1. Concurrent connect() during slow handshake shares same promise & waits for OPEN
+    mode = 'slow_open';
+    const p1 = net.connect({ timeoutMs: 1000 });
+    const p2 = net.connect({ timeoutMs: 1000 });
+    assert.equal(p1, p2, 'Concurrent connect() must reuse in-flight promise');
+    assert.equal(net.connected, false);
+    await Promise.all([p1, p2]);
+    assert.equal(net.connected, true);
+    assert.equal(net.send({ type: 'create_room', mode: 'ai' }), true);
+    assert.equal(net.send({ type: 'ping', clientTime: 1 }), true);
+    assert.ok(sentMessages.some((m) => m.type === 'create_room'));
+
+    // Reset connection for timeout test
+    net._stopPing();
+    net.ws.close();
+    net.ws = null;
+    net.connected = false;
+
+    // 2. Hanging endpoint times out with WS_CONNECT_TIMEOUT and cleans up state
+    mode = 'hang';
+    await assert.rejects(() => net.connect({ timeoutMs: 80 }), /WS_CONNECT_TIMEOUT/);
+    assert.equal(net.ws, null);
+    assert.equal(net._connectPromise, null);
+    assert.equal(net.connected, false);
+
+    // 3. Close before open rejects with WS_CONNECT_CLOSED and cleans up state
+    mode = 'close_early';
+    await assert.rejects(() => net.connect({ timeoutMs: 500 }), /WS_CONNECT_CLOSED/);
+    assert.equal(net.ws, null);
+    assert.equal(net._connectPromise, null);
+
+    // 4. Retry succeeds once endpoint recovers
+    mode = 'fast_open';
+    await net.connect({ timeoutMs: 500 });
+    assert.equal(net.connected, true);
+    assert.equal(net.send({ type: 'join_room', roomCode: 'ABCD' }), true);
+
+    // 5. Stale timed-out socket firing late close must NOT clobber newer active connection
+    let disconnectCount = 0;
+    net.handlers.onConnectionChange = (isConn) => {
+      if (!isConn) disconnectCount++;
+    };
+    const staleSocket = createdSockets[1]; // from mode === 'hang'
+    staleSocket._emit('close', {});
+    assert.equal(net.connected, true);
+    assert.ok(net.ws !== null);
+    assert.equal(disconnectCount, 0);
+
+    net._stopPing();
+    net.ws.close();
+    net.ws = null;
+    net.connected = false;
+
+    // 6. Synchronous throw in new WebSocket() rejects cleanly without TDZ ReferenceError
+    mode = 'sync_throw';
+    await assert.rejects(() => net.connect({ timeoutMs: 500 }), /WS_SYNC_CONSTRUCT_ERROR/);
+    assert.equal(net.ws, null);
+    assert.equal(net._connectPromise, null);
+    assert.equal(net.connected, false);
+  } finally {
+    globalThis.WebSocket = prevWS;
+    globalThis.location = prevLocation;
+    globalThis.sessionStorage = prevStorage;
+  }
+});
+
+test('AC-18: CandyAudio falls back to in-memory mute state when sessionStorage throws SecurityError', () => {
+  const prevStorage = globalThis.sessionStorage;
+  const securityErr = () => {
+    const err = new Error('Access is denied for this document.');
+    err.name = 'SecurityError';
+    throw err;
+  };
+
+  globalThis.sessionStorage = {
+    getItem: securityErr,
+    setItem: securityErr
+  };
+
+  try {
+    const audio = new CandyAudio();
+    assert.equal(audio.muted, false);
+    assert.equal(audio.toggleMute(), true);
+    assert.equal(audio.muted, true);
+    assert.equal(audio.toggleMute(), false);
+    assert.equal(audio.muted, false);
+  } finally {
+    globalThis.sessionStorage = prevStorage;
   }
 });
