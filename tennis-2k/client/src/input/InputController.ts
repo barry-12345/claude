@@ -1,6 +1,5 @@
 import type {
   InputDiagnostics,
-  InputPhase,
   PlayerInputFrame,
   ShotActionKey,
 } from '@court2k/shared';
@@ -33,13 +32,20 @@ const GAMEPLAY_CODES = new Set([
   'Space',
 ]);
 
-function mapActionCode(code: string): ShotActionKey | null {
+function mapActionCode(code: string): Exclude<ShotActionKey, 'none'> | null {
   if (code === 'KeyJ') return 'J';
   if (code === 'KeyK') return 'K';
   if (code === 'KeyL') return 'L';
   return null;
 }
 
+/**
+ * V2 deterministic keyboard input sampler implementing all 4 CONTRACT §5.1 edge rules:
+ * 1. Ignores browser keydown auto-repeat (`e.repeat === true`) for `actionPressed`.
+ * 2. Latches a single-frame `{ action, actionPressed: true }` if keydown+keyup occur within one frame.
+ * 3. Supports seamless switching between J/K/L while holding without old keyup clearing the new key.
+ * 4. Full state clear + listener rebind + blur on `resetAndRebind()`.
+ */
 export class InputController implements ClientInputController {
   private readonly win: InputTargetEnv | null;
   private readonly doc: DocumentLike | null;
@@ -52,10 +58,9 @@ export class InputController implements ClientInputController {
   private allowArrowKeys = true;
   private captureActive = false;
 
+  private heldActionOrder: Array<Exclude<ShotActionKey, 'none'>> = [];
   private currentAction: ShotActionKey = 'none';
-  private heldSent = false;
-  private pendingReleaseAction: ShotActionKey | null = null;
-  private queuedTapAction: ShotActionKey | null = null;
+  private pendingPressAction: Exclude<ShotActionKey, 'none'> | null = null;
 
   private onEscapeCb: (() => void) | null = null;
 
@@ -82,11 +87,16 @@ export class InputController implements ClientInputController {
     this.pressedKeys.add(code);
 
     const action = mapActionCode(code);
-    if (action && !e.repeat && this.currentAction === 'none') {
+    if (!action || e.repeat) {
+      return;
+    }
+
+    // Rule 3: Pressing another shot key switches immediately & emits actionPressed;
+    // ignore duplicate non-repeat keydown if already tracked in heldActionOrder.
+    if (!this.heldActionOrder.includes(action)) {
+      this.heldActionOrder.push(action);
       this.currentAction = action;
-      this.heldSent = false;
-      this.pendingReleaseAction = null;
-      this.queuedTapAction = null;
+      this.pendingPressAction = action;
     }
   };
 
@@ -96,14 +106,21 @@ export class InputController implements ClientInputController {
     this.pressedKeys.delete(code);
 
     const action = mapActionCode(code);
-    if (action && this.currentAction === action) {
-      if (this.heldSent) {
-        this.pendingReleaseAction = action;
-      } else {
-        this.queuedTapAction = action;
-      }
-      this.currentAction = 'none';
-      this.heldSent = false;
+    if (!action) {
+      return;
+    }
+
+    const idx = this.heldActionOrder.indexOf(action);
+    if (idx !== -1) {
+      this.heldActionOrder.splice(idx, 1);
+    }
+
+    if (this.currentAction === action) {
+      // Rule 3: Fall back to any remaining held shot key without re-emitting actionPressed
+      this.currentAction =
+        this.heldActionOrder.length > 0
+          ? this.heldActionOrder[this.heldActionOrder.length - 1]
+          : 'none';
     }
   };
 
@@ -202,22 +219,16 @@ export class InputController implements ClientInputController {
     }
 
     let action: ShotActionKey = 'none';
-    let phase: InputPhase = 'idle';
+    let actionPressed = false;
 
     if (this.captureActive) {
-      if (this.queuedTapAction) {
-        action = this.queuedTapAction;
-        phase = 'hold';
-        this.pendingReleaseAction = this.queuedTapAction;
-        this.queuedTapAction = null;
-      } else if (this.pendingReleaseAction) {
-        action = this.pendingReleaseAction;
-        phase = 'release';
-        this.pendingReleaseAction = null;
-      } else if (this.currentAction !== 'none') {
+      if (this.pendingPressAction !== null) {
+        action = this.pendingPressAction;
+        actionPressed = true;
+        this.pendingPressAction = null;
+      } else {
         action = this.currentAction;
-        phase = 'hold';
-        this.heldSent = true;
+        actionPressed = false;
       }
     }
 
@@ -228,7 +239,7 @@ export class InputController implements ClientInputController {
       aimX: moveX,
       aimZ: moveZ,
       action,
-      phase,
+      actionPressed,
     };
   }
 
@@ -243,9 +254,8 @@ export class InputController implements ClientInputController {
 
   private clearHeldState(): void {
     this.pressedKeys.clear();
+    this.heldActionOrder = [];
     this.currentAction = 'none';
-    this.heldSent = false;
-    this.pendingReleaseAction = null;
-    this.queuedTapAction = null;
+    this.pendingPressAction = null;
   }
 }

@@ -1,5 +1,42 @@
-import { cloneMatchState, type GameEvent, type MatchState } from '@court2k/shared';
+import { cloneMatchState, type GameEvent, type MatchState, type ServerMessage } from '@court2k/shared';
 import type { SnapshotBuffer } from './SnapshotBuffer.js';
+
+export type FullSyncResolution =
+  | {
+      kind: 'lobby_waiting';
+      mode: 'lobby';
+      onlineState: null;
+    }
+  | {
+      kind: 'enter_match';
+      mode: 'online';
+      onlineState: MatchState;
+    };
+
+/**
+ * Resolve client state transition when receiving FULL_SYNC.
+ * When `snapshot.phase === 'waiting'`, the client stays in lobby view instead of switching to an empty match canvas.
+ */
+export function resolveFullSyncTransition(
+  payload: Extract<ServerMessage, { type: 'FULL_SYNC' }>['payload'],
+  snapshots: SnapshotBuffer
+): FullSyncResolution {
+  if (payload.snapshot.phase === 'waiting') {
+    snapshots.clear();
+    return {
+      kind: 'lobby_waiting',
+      mode: 'lobby',
+      onlineState: null,
+    };
+  }
+  const cloned = cloneMatchState(payload.snapshot);
+  snapshots.reset(cloned);
+  return {
+    kind: 'enter_match',
+    mode: 'online',
+    onlineState: cloned,
+  };
+}
 
 /**
  * Synchronize client online MatchState and SnapshotBuffer when GAME_EVENT(MATCH_OVER) arrives

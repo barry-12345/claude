@@ -38,7 +38,7 @@ export interface LobbyCallbacks {
 }
 
 const HEADGEAR_TEXT: Record<string, string> = {
-  headband: '白头带 · 宽肩重炮型',
+  headband: '运动头带 · 宽肩重炮型',
   wristband_only: '双护腕 · 均衡标准型',
   visor: '运动遮阳帽 · 复古全白',
   cap_backwards: '反戴鸭舌帽 · 敏捷修长',
@@ -98,7 +98,7 @@ export class LobbyView {
               <span class="stat-pill">POW ${a.power}</span>
               <span class="stat-pill">SPD ${a.speed}</span>
               <span class="stat-pill">SPN ${a.spin}</span>
-              <span class="stat-pill">TIM ${a.timing}</span>
+              <span class="stat-pill">CTL ${a.control}</span>
               <span class="stat-pill">NET ${a.net}</span>
             </div>
           </button>`;
@@ -176,7 +176,7 @@ export class LobbyView {
         <div class="brand-title">
           <span class="brand-badge">COURT 2K · GRAND SLAM ERA</span>
           <h1>Court 2K：大满贯时代</h1>
-          <p>60Hz 确定性物理 · 2K 绿条甜区 · Takeover 火热槽 · 鹰眼特写</p>
+          <p>60Hz 确定性物理 · 自动最佳触球 · 前后左右战术博弈 · 鹰眼特写</p>
         </div>
         <button type="button" class="hud-btn" id="btn-lobby-mute">${muted ? '🔇 音效已关' : '🔊 音效开启'}</button>
       </div>
@@ -213,14 +213,14 @@ export class LobbyView {
 
       <div class="lobby-footer">
         <div>
-          操控：<span class="kbd">WASD</span> / <span class="kbd">方向键</span> 移动与瞄准 ·
-          <span class="kbd">J</span> 主攻/一发 ·
-          <span class="kbd">K</span> 切削/二发 ·
-          <span class="kbd">W+K</span> 放小球 ·
+          <span class="kbd">WASD/方向键</span> 走位+左右 ·
+          <span class="kbd">J</span> 打后强攻 ·
+          <span class="kbd">K</span> 打前小球/削球 ·
           <span class="kbd">L</span> 挑高 ·
+          不按键放球 ·
           <span class="kbd">Esc</span> 暂停
         </div>
-        <div>按住 J/K/L 蓄力，绿区松手触发 2K Perfect 爆击</div>
+        <div>提前按住或短按 J/K/L 自动最佳触球，长按松手取消</div>
       </div>
     `;
 

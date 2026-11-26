@@ -61,7 +61,7 @@ body,
   flex-direction: column;
   justify-content: space-between;
   padding: 20px 28px;
-  background: linear-gradient(90deg, rgba(8, 12, 22, 0.92) 0%, rgba(8, 12, 22, 0.72) 56%, rgba(8, 12, 22, 0.25) 100%);
+  background: linear-gradient(90deg, rgba(8, 12, 22, 0.88) 0%, rgba(8, 12, 22, 0.56) 52%, rgba(8, 12, 22, 0) 78%);
 }
 
 .lobby-header {
@@ -510,53 +510,44 @@ body,
   right: 20px;
   bottom: 16px;
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: flex-end;
   gap: 16px;
 }
 
-.takeover-card {
-  width: 240px;
-  background: rgba(9, 14, 26, 0.84);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+.controls-mini {
+  background: rgba(9, 14, 26, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
-  padding: 8px 11px;
-}
-
-.takeover-card.active {
-  border-color: var(--gold);
-  box-shadow: 0 0 18px var(--gold-glow);
-}
-
-.takeover-head {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: #dbe6f7;
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.armed-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
   font-size: 11px;
   font-weight: 800;
-  margin-bottom: 5px;
+  color: #09101a;
+  margin-right: 4px;
 }
 
-.takeover-track {
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  overflow: hidden;
+.armed-j {
+  background: #f59e0b;
 }
 
-.takeover-fill {
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, #f97316, #facc15);
-  transition: width 0.16s ease;
+.armed-k {
+  background: #06b6d4;
 }
 
-.controls-mini {
-  background: rgba(9, 14, 26, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 11px;
-  color: var(--muted);
+.armed-l {
+  background: #c084fc;
 }
 
 /* Center Callouts */

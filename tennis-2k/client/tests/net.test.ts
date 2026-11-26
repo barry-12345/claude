@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMatchState, type GameEvent, type ServerMessage } from '@court2k/shared';
-import { applyOnlineMatchOver } from '../src/net/onlineSync.js';
+import { applyOnlineMatchOver, resolveFullSyncTransition } from '../src/net/onlineSync.js';
 import { SnapshotBuffer } from '../src/net/SnapshotBuffer.js';
 import { deriveWsUrl, WsClient, type WebSocketLike } from '../src/net/WsClient.js';
 
@@ -56,7 +56,7 @@ class MemoryStorage implements Storage {
   }
 }
 
-describe('WS URL derivation, SnapshotBuffer reset, online MATCH_OVER sync, and WsClient reconnect', () => {
+describe('WS URL derivation, SnapshotBuffer reset, online sync, and WsClient reconnect', () => {
   it('derives relative WS URL cleanly under root and /tennis/ subpaths', () => {
     expect(deriveWsUrl('/', { protocol: 'http:', host: '127.0.0.1:3201' })).toBe(
       'ws://127.0.0.1:3201/ws'
@@ -90,6 +90,53 @@ describe('WS URL derivation, SnapshotBuffer reset, online MATCH_OVER sync, and W
     expect(buf.sample(2050)?.tick).toBe(55);
   });
 
+  it('keeps client in lobby mode when FULL_SYNC snapshot.phase is waiting', () => {
+    const buf = new SnapshotBuffer(40);
+    const waitingState = createMatchState({
+      mode: 'online',
+      court: 'grass',
+      format: 'fast4',
+      archetypes: ['serve_volley', 'allcourt'],
+      seed: 12,
+    });
+    waitingState.phase = 'waiting';
+    buf.push(1, 1000, waitingState, 1000);
+
+    const waitingRes = resolveFullSyncTransition(
+      {
+        roomCode: 'ROOM',
+        yourSide: 1,
+        playerIndex: 0,
+        snapshot: waitingState,
+        requireInputReset: true,
+      },
+      buf
+    );
+    expect(waitingRes).toEqual({
+      kind: 'lobby_waiting',
+      mode: 'lobby',
+      onlineState: null,
+    });
+    expect(buf.size()).toBe(0);
+
+    // Once match is active (e.g. rally), FULL_SYNC enters online match mode
+    const activeState = { ...waitingState, phase: 'rally' as const, tick: 44 };
+    const activeRes = resolveFullSyncTransition(
+      {
+        roomCode: 'ROOM',
+        yourSide: -1,
+        playerIndex: 1,
+        snapshot: activeState,
+        requireInputReset: true,
+      },
+      buf
+    );
+    expect(activeRes.kind).toBe('enter_match');
+    expect(activeRes.mode).toBe('online');
+    expect(activeRes.onlineState?.tick).toBe(44);
+    expect(buf.size()).toBe(1);
+  });
+
   it('transitions onlineState & SnapshotBuffer to match_over when receiving only GAME_EVENT(MATCH_OVER)', () => {
     const buf = new SnapshotBuffer(40);
     const pausedState = createMatchState({
@@ -121,8 +168,8 @@ describe('WS URL derivation, SnapshotBuffer reset, online MATCH_OVER sync, and W
           firstServesTotal: 5,
           winners: 3,
           unforcedErrors: 1,
-          perfectShots: 5,
-          totalMeterShots: 8,
+          cleanShots: 5,
+          totalShots: 8,
         },
         pausedState.stats[1],
       ],
@@ -133,6 +180,7 @@ describe('WS URL derivation, SnapshotBuffer reset, online MATCH_OVER sync, and W
     expect(updated?.score.winner).toBe(0);
     expect(updated?.score.games).toEqual([2, 1]);
     expect(updated?.stats[0].winners).toBe(3);
+    expect(updated?.stats[0].cleanShots).toBe(5);
     expect(buf.sample(5100)?.phase).toBe('match_over');
   });
 
