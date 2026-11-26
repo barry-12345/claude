@@ -2,11 +2,11 @@ import type {
   ArchetypeId,
   ClientMessage,
   CourtId,
-  InputPhase,
   MatchFormat,
   PlayerIndex,
   ScorePatch,
   ShotActionKey,
+  SpawnIncomingBallOptions,
   TestCommandPayload,
 } from '@court2k/shared';
 
@@ -14,7 +14,6 @@ const VALID_COURTS = new Set<CourtId>(['hard', 'clay', 'grass']);
 const VALID_FORMATS = new Set<MatchFormat>(['fast4', 'super_tiebreak']);
 const VALID_ARCHETYPES = new Set<ArchetypeId>(['power', 'allcourt', 'serve_volley', 'defender']);
 const VALID_ACTIONS = new Set<ShotActionKey>(['none', 'J', 'K', 'L']);
-const VALID_PHASES = new Set<InputPhase>(['idle', 'hold', 'release']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -88,12 +87,30 @@ function parseTestCommand(raw: unknown): TestCommandPayload | null {
       if (!patch) return null;
       return { cmd: 'set_score', args: patch };
     }
-    case 'set_takeover': {
-      if (!isPlayerIndex(raw.args.playerIndex) || !isFiniteNumber(raw.args.value)) return null;
-      return {
-        cmd: 'set_takeover',
-        args: { playerIndex: raw.args.playerIndex, value: clamp(raw.args.value, 0, 100) },
+    case 'spawn_incoming_ball': {
+      if (!isFiniteNumber(raw.args.targetX) || !isFiniteNumber(raw.args.targetZ)) {
+        return null;
+      }
+      if (
+        raw.args.speedXZ !== undefined &&
+        (!isFiniteNumber(raw.args.speedXZ) || raw.args.speedXZ <= 0 || raw.args.speedXZ > 50)
+      ) {
+        return null;
+      }
+      if (raw.args.forPlayerIndex !== undefined && !isPlayerIndex(raw.args.forPlayerIndex)) {
+        return null;
+      }
+      const args: SpawnIncomingBallOptions = {
+        targetX: clamp(raw.args.targetX, -8, 8),
+        targetZ: clamp(raw.args.targetZ, -16, 16),
       };
+      if (raw.args.speedXZ !== undefined) {
+        args.speedXZ = raw.args.speedXZ;
+      }
+      if (raw.args.forPlayerIndex !== undefined) {
+        args.forPlayerIndex = raw.args.forPlayerIndex;
+      }
+      return { cmd: 'spawn_incoming_ball', args };
     }
     case 'trigger_hawkeye': {
       if (typeof raw.args.inBounds !== 'boolean' || !isFiniteNumber(raw.args.distCm)) {
@@ -234,13 +251,14 @@ export function parseClientMessage(rawText: string): ParseClientMessageResult {
 
     case 'PLAYER_INPUT': {
       if (
+        p.phase !== undefined ||
         !isNonNegativeInt(p.seq) ||
         !isFiniteNumber(p.moveX) ||
         !isFiniteNumber(p.moveZ) ||
         !isFiniteNumber(p.aimX) ||
         !isFiniteNumber(p.aimZ) ||
         !VALID_ACTIONS.has(p.action as ShotActionKey) ||
-        !VALID_PHASES.has(p.phase as InputPhase) ||
+        typeof p.actionPressed !== 'boolean' ||
         !isFiniteNumber(p.clientTime)
       ) {
         return { ok: false, reason: 'Invalid PLAYER_INPUT fields' };
@@ -256,7 +274,7 @@ export function parseClientMessage(rawText: string): ParseClientMessageResult {
             aimX: clamp(p.aimX, -1, 1),
             aimZ: clamp(p.aimZ, -1, 1),
             action: p.action as ShotActionKey,
-            phase: p.phase as InputPhase,
+            actionPressed: p.actionPressed,
             clientTime: p.clientTime,
           },
         },
