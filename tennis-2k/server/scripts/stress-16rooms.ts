@@ -98,8 +98,9 @@ async function main(): Promise<void> {
         const pair = pairs[i];
         pair.seq[0] += 1;
         pair.seq[1] += 1;
-        const phase0 = pair.seq[0] % 45 === 1 ? 'hold' : pair.seq[0] % 45 === 25 ? 'release' : 'idle';
-        const action0 = phase0 === 'idle' ? 'none' : 'J';
+        const cycle = pair.seq[0] % 45;
+        const action0 = cycle >= 1 && cycle < 25 ? 'J' : 'none';
+        const actionPressed0 = cycle === 1;
         sendMsg(pair.p0, {
           type: 'PLAYER_INPUT',
           payload: {
@@ -109,7 +110,7 @@ async function main(): Promise<void> {
             aimX: 0.3,
             aimZ: -0.5,
             action: action0,
-            phase: phase0,
+            actionPressed: actionPressed0,
             clientTime: now,
           },
         });
@@ -122,7 +123,7 @@ async function main(): Promise<void> {
             aimX: -0.3,
             aimZ: -0.5,
             action: 'none',
-            phase: 'idle',
+            actionPressed: false,
             clientTime: now,
           },
         });
@@ -145,7 +146,7 @@ async function main(): Promise<void> {
     if (endRssMb > maxRssMb) maxRssMb = endRssMb;
     const metrics = server.getMetrics();
 
-    console.log('=== AC-15 16-Room 60Hz Stress Test Report ===');
+    console.log('=== AC-16 16-Room 60Hz Stress Test Report ===');
     console.log(`Rooms: ${server.roomManager.getRoomCount()}`);
     console.log(`Duration: ${elapsedSec.toFixed(2)}s`);
     console.log(`Total Server Ticks: ${metrics.totalTicks} (~${(metrics.totalTicks / elapsedSec).toFixed(1)} Hz)`);

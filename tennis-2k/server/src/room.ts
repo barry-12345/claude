@@ -12,6 +12,7 @@ import {
   launchHawkeyeTestBall,
   requestManualPause,
   requestManualResume,
+  spawnIncomingTestBall,
   stepMatch,
   toWorldInput,
   type ArchetypeId,
@@ -37,7 +38,7 @@ const IDLE_INPUT: PlayerInputFrame = {
   aimX: 0,
   aimZ: 0,
   action: 'none',
-  phase: 'idle',
+  actionPressed: false,
 };
 
 const MAX_INPUT_QUEUE = 8;
@@ -212,6 +213,8 @@ export class Room {
     this.matchConfig.archetypes[1] = archetype;
     this.state.config.archetypes[1] = archetype;
     this.state.players[1].archetype = archetype;
+    this.state.pause.disconnected[1] = false;
+    this.state.pause.disconnectRemainingSec[1] = COURT_DIM.DISCONNECT_GRACE_SEC;
     this.emptySinceMs = null;
 
     sendServerMessage(guestWs, {
@@ -331,13 +334,6 @@ export class Room {
 
     if (this.state.phase === 'waiting') {
       this.ready[idx] = false;
-      if (idx === 1) {
-        // Guest slot is immediately freed during waiting
-        this.sessionTokens[1] = null;
-        this.matchConfig.archetypes[1] = 'allcourt';
-        this.state.config.archetypes[1] = 'allcourt';
-        this.state.players[1].archetype = 'allcourt';
-      }
       this.state = applyDisconnect(this.state, idx);
       if (this.bothDisconnected) {
         this.emptySinceMs = nowMs;
@@ -473,15 +469,15 @@ export class Room {
             aimX: msg.payload.aimX,
             aimZ: msg.payload.aimZ,
             action: msg.payload.action,
-            phase: msg.payload.phase,
+            actionPressed: msg.payload.actionPressed,
           },
           side
         );
         const queue = this.inputQueues[idx];
         if (queue.length >= MAX_INPUT_QUEUE) {
-          const idleIdx = queue.findIndex((f) => f.phase === 'idle');
-          if (idleIdx !== -1) {
-            queue.splice(idleIdx, 1);
+          const nonEdgeIdx = queue.findIndex((f) => !f.actionPressed);
+          if (nonEdgeIdx !== -1) {
+            queue.splice(nonEdgeIdx, 1);
           } else {
             queue.shift();
           }
@@ -627,23 +623,9 @@ export class Room {
         this.broadcastSnapshot(nowMs);
         return;
       }
-      case 'set_takeover': {
-        const next = cloneMatchState(this.state);
-        const p = next.players[payload.args.playerIndex];
-        const val = payload.args.value;
-        const wasActive = p.takeoverPointsLeft > 0;
-        p.takeoverEnergy = val;
-        if (val >= 100) {
-          p.takeoverPointsLeft = 2;
-          p.takeoverCooldown = false;
-        } else {
-          p.takeoverPointsLeft = 0;
-          p.takeoverCooldown = false;
-        }
-        this.state = next;
-        if (!wasActive && val >= 100) {
-          this.emitGameEvent({ type: 'TAKEOVER_ON', player: payload.args.playerIndex });
-        }
+      case 'spawn_incoming_ball': {
+        this.state = spawnIncomingTestBall(this.state, payload.args, this.rng);
+        this.clearInputs();
         this.broadcastSnapshot(nowMs);
         return;
       }
@@ -669,12 +651,9 @@ export class Room {
       return next;
     }
     const prev = this.lastInputs[idx];
-    if (prev.phase === 'release') {
-      const reset: PlayerInputFrame = { ...prev, action: 'none', phase: 'idle' };
-      this.lastInputs[idx] = reset;
-      return reset;
-    }
-    return prev;
+    const reused: PlayerInputFrame = { ...prev, actionPressed: false };
+    this.lastInputs[idx] = reused;
+    return reused;
   }
 
   private emitGameEvent(event: GameEvent): void {

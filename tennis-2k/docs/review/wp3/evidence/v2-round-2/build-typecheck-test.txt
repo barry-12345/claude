@@ -1,0 +1,37 @@
+﻿=== npm run build -w @court2k/shared ===
+
+> @court2k/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+
+=== npm run build -w @court2k/server ===
+
+> @court2k/server@1.0.0 build
+> tsc -p tsconfig.json
+
+
+=== npm run typecheck -w @court2k/server ===
+
+> @court2k/server@1.0.0 typecheck
+> tsc -p tsconfig.test.json --noEmit
+
+
+=== npm run test -w @court2k/server ===
+
+> @court2k/server@1.0.0 test
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90mC:/Users/Barry/.gemini/antigravity/brain/fdfcab71-4559-4883-b470-ad124349528d/scratch/wt-wp3/tennis-2k/server[39m
+
+ [32m✓[39m tests/server.integration.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 12561[2mms[22m[39m
+   [33m[2m✓[22m[39m @court2k/server V2 integration suite[2m > [22mvalidates spawn_incoming_ball strictly, rejects V1 set_takeover, and executes mirrored V2 auto-contact + no-press let-pass [33m 7711[2mms[22m[39m
+   [33m[2m✓[22m[39m @court2k/server V2 integration suite[2m > [22menforces manual pause 3x limit, 60s timeout auto-resume, 3s countdown, 5Hz pause snapshots, and race handling [33m 575[2mms[22m[39m
+   [33m[2m✓[22m[39m @court2k/server V2 integration suite[2m > [22mclears residual held inputs on point_over/hawkeye transition to serve_ready (no ghost serve) [33m 3728[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m12 passed[39m[22m[90m (12)[39m
+[2m   Start at [22m 02:32:57
+[2m   Duration [22m 13.76s[2m (transform 254ms, setup 0ms, collect 375ms, tests 12.56s, environment 0ms, prepare 286ms)[22m
+
+

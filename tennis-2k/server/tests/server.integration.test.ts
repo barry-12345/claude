@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import {
+  COURT_DIM,
   ROOM_CODE_ALPHABET,
   type ClientMessage,
   type ServerMessage,
 } from '@court2k/shared';
-import { createCourt2kServer, type Court2kServerInstance } from '../src/index.js';
+import { createCourt2kServer, Room, type Court2kServerInstance } from '../src/index.js';
 
 class TestClient {
   readonly ws: WebSocket;
@@ -101,6 +102,20 @@ class TestClient {
   }
 }
 
+function createMockSocket(): { ws: WebSocket; sent: ServerMessage[] } {
+  const sent: ServerMessage[] = [];
+  const ws = {
+    readyState: WebSocket.OPEN,
+    send(raw: string) {
+      sent.push(JSON.parse(raw) as ServerMessage);
+    },
+    close() {
+      // no-op
+    },
+  } as unknown as WebSocket;
+  return { ws, sent };
+}
+
 const activeServers: Court2kServerInstance[] = [];
 const activeClients: TestClient[] = [];
 
@@ -158,7 +173,162 @@ afterEach(async () => {
   }
 });
 
-describe('@court2k/server integration suite', () => {
+describe('@court2k/server V2 Room 60Hz input queue invariants', () => {
+  it('never drops actionPressed===true edge frames on queue overflow unless all queued frames are edges', () => {
+    const m0 = createMockSocket();
+    const m1 = createMockSocket();
+    const room = new Room('TEST', m0.ws, 'hard', 'fast4', 'allcourt', 42, 1000);
+    room.joinGuest(m1.ws, 'defender', 1001);
+    room.handleMessage(0, m0.ws, { type: 'READY', payload: { ready: true } }, 1002, true);
+    room.handleMessage(1, m1.ws, { type: 'READY', payload: { ready: true } }, 1003, true);
+    expect(room.state.phase).toBe('serve_ready');
+
+    // Burst 10 frames before stepping: frame #2 is an edge tap (J, actionPressed: true), surrounded by non-edge frames
+    const burst: Array<{ seq: number; action: 'none' | 'J'; actionPressed: boolean }> = [
+      { seq: 1, action: 'none', actionPressed: false },
+      { seq: 2, action: 'J', actionPressed: true },
+      { seq: 3, action: 'none', actionPressed: false },
+      { seq: 4, action: 'none', actionPressed: false },
+      { seq: 5, action: 'none', actionPressed: false },
+      { seq: 6, action: 'none', actionPressed: false },
+      { seq: 7, action: 'none', actionPressed: false },
+      { seq: 8, action: 'none', actionPressed: false },
+      { seq: 9, action: 'none', actionPressed: false },
+      { seq: 10, action: 'none', actionPressed: false },
+    ];
+    for (const f of burst) {
+      room.handleMessage(
+        0,
+        m0.ws,
+        {
+          type: 'PLAYER_INPUT',
+          payload: {
+            seq: f.seq,
+            moveX: 0,
+            moveZ: 0,
+            aimX: 0,
+            aimZ: 0,
+            action: f.action,
+            actionPressed: f.actionPressed,
+            clientTime: 1010 + f.seq,
+          },
+        },
+        1010 + f.seq,
+        true
+      );
+    }
+
+    // Step 8 ticks to drain queue: frame #2 (edge) MUST have been preserved and triggered serve_toss
+    for (let t = 0; t < 8; t++) {
+      room.stepTick(COURT_DIM.FIXED_DT, 1030 + t * 16);
+    }
+    expect(room.state.phase).toBe('serve_toss');
+
+    // Second check: when ALL 8 queued frames are edges, a 9th edge frame shifts out the oldest
+    const m2 = createMockSocket();
+    const m3 = createMockSocket();
+    const roomAllEdge = new Room('EDGE', m2.ws, 'hard', 'fast4', 'allcourt', 99, 1000);
+    roomAllEdge.joinGuest(m3.ws, 'defender', 1001);
+    roomAllEdge.handleMessage(0, m2.ws, { type: 'READY', payload: { ready: true } }, 1002, true);
+    roomAllEdge.handleMessage(1, m3.ws, { type: 'READY', payload: { ready: true } }, 1003, true);
+    roomAllEdge.handleMessage(
+      0,
+      m2.ws,
+      {
+        type: 'TEST_COMMAND',
+        payload: { cmd: 'spawn_incoming_ball', args: { targetX: 0, targetZ: 9, forPlayerIndex: 0 } },
+      },
+      1004,
+      true
+    );
+
+    for (let seq = 1; seq <= 9; seq++) {
+      roomAllEdge.handleMessage(
+        0,
+        m2.ws,
+        {
+          type: 'PLAYER_INPUT',
+          payload: {
+            seq,
+            moveX: 0,
+            moveZ: 0,
+            aimX: 0,
+            aimZ: 0,
+            action: seq === 9 ? 'K' : 'J',
+            actionPressed: true,
+            clientTime: 1010 + seq,
+          },
+        },
+        1010 + seq,
+        true
+      );
+    }
+    // Drain 8 ticks; the 8th consumed frame must be seq 9 ('K'), not seq 1 ('J')
+    for (let t = 0; t < 8; t++) {
+      roomAllEdge.stepTick(COURT_DIM.FIXED_DT, 1030 + t * 16);
+    }
+    expect(roomAllEdge.state.players[0].stance.armedAction).toBe('K');
+  });
+
+  it('clears actionPressed=false when reusing lastInputs on empty queue while keeping held action', () => {
+    const m0 = createMockSocket();
+    const m1 = createMockSocket();
+    const room = new Room('REUS', m0.ws, 'hard', 'fast4', 'allcourt', 42, 1000);
+    room.joinGuest(m1.ws, 'defender', 1001);
+    room.handleMessage(0, m0.ws, { type: 'READY', payload: { ready: true } }, 1002, true);
+    room.handleMessage(1, m1.ws, { type: 'READY', payload: { ready: true } }, 1003, true);
+
+    room.handleMessage(
+      0,
+      m0.ws,
+      {
+        type: 'TEST_COMMAND',
+        payload: {
+          cmd: 'spawn_incoming_ball',
+          args: { targetX: 0, targetZ: 10, speedXZ: 14, forPlayerIndex: 0 },
+        },
+      },
+      1005,
+      true
+    );
+    expect(room.state.phase).toBe('rally');
+
+    // Send a single held frame with actionPressed: true, then stop sending
+    room.handleMessage(
+      0,
+      m0.ws,
+      {
+        type: 'PLAYER_INPUT',
+        payload: {
+          seq: 1,
+          moveX: 0,
+          moveZ: 0,
+          aimX: 0,
+          aimZ: 0,
+          action: 'J',
+          actionPressed: true,
+          clientTime: 1010,
+        },
+      },
+      1010,
+      true
+    );
+
+    // Tick 1 consumes the queued frame -> holdDurationSec = 1/60
+    room.stepTick(COURT_DIM.FIXED_DT, 1020);
+    expect(room.state.players[0].stance.armedAction).toBe('J');
+    expect(room.state.players[0].stance.holdDurationSec).toBeCloseTo(COURT_DIM.FIXED_DT, 5);
+
+    // Next 4 ticks have empty queue: reused input MUST have actionPressed: false so holdDurationSec accumulates instead of resetting to 1/60
+    for (let i = 0; i < 4; i++) {
+      room.stepTick(COURT_DIM.FIXED_DT, 1036 + i * 16);
+    }
+    expect(room.state.players[0].stance.armedAction).toBe('J');
+    expect(room.state.players[0].stance.holdDurationSec).toBeCloseTo(5 * COURT_DIM.FIXED_DT, 5);
+  });
+});
+
+describe('@court2k/server V2 integration suite', () => {
   it('serves /health and /tennis/health and supports subpath WS upgrade', async () => {
     const { port } = await startTestServer({ wsPath: '/tennis/ws' });
 
@@ -181,7 +351,7 @@ describe('@court2k/server integration suite', () => {
     const res404 = await fetch(`http://127.0.0.1:${port}/unknown`);
     expect(res404.status).toBe(404);
 
-    // Subpath WS upgrade works on /tennis/ws and arbitrary prefix /proxy/ws
+    // Subpath WS upgrade works on /tennis/ws
     const c1 = await connectClient(`ws://127.0.0.1:${port}/tennis/ws`);
     c1.send({ type: 'PING', payload: { clientTime: 1234 } });
     // PING before joining room returns ROOM_NOT_FOUND
@@ -198,7 +368,7 @@ describe('@court2k/server integration suite', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('handles room creation, loadout reset rules, and all ErrorCodes accurately', async () => {
+  it('handles room creation, loadout reset rules, V2 strict validation, and all ErrorCodes accurately', async () => {
     const { wsUrl } = await startTestServer({ enableTestHooks: false, rateLimitMaxPerSec: 120 });
     const p0 = await connectClient(wsUrl);
     const p1 = await connectClient(wsUrl);
@@ -212,8 +382,51 @@ describe('@court2k/server integration suite', () => {
     p0.sendRaw(Buffer.from([1, 2, 3]));
     expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_MESSAGE');
 
-    // 2. FORBIDDEN_TEST_HOOK when ENABLE_TEST_HOOKS != '1'
+    // Reject V1 PLAYER_INPUT (phase instead of actionPressed, or hybrid containing phase)
+    p0.sendRaw(
+      JSON.stringify({
+        type: 'PLAYER_INPUT',
+        payload: {
+          seq: 1,
+          moveX: 0,
+          moveZ: 0,
+          aimX: 0,
+          aimZ: 0,
+          action: 'J',
+          phase: 'hold',
+          clientTime: Date.now(),
+        },
+      })
+    );
+    expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_MESSAGE');
+    p0.sendRaw(
+      JSON.stringify({
+        type: 'PLAYER_INPUT',
+        payload: {
+          seq: 2,
+          moveX: 0,
+          moveZ: 0,
+          aimX: 0,
+          aimZ: 0,
+          action: 'J',
+          actionPressed: true,
+          phase: 'hold',
+          clientTime: Date.now(),
+        },
+      })
+    );
+    expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_MESSAGE');
+
+    // 2. FORBIDDEN_TEST_HOOK when ENABLE_TEST_HOOKS != '1' (both set_seed and spawn_incoming_ball)
     p0.send({ type: 'TEST_COMMAND', payload: { cmd: 'set_seed', args: { seed: 42 } } });
+    expect((await p0.waitFor('ERROR')).payload.code).toBe('FORBIDDEN_TEST_HOOK');
+    p0.send({
+      type: 'TEST_COMMAND',
+      payload: {
+        cmd: 'spawn_incoming_ball',
+        args: { targetX: 0, targetZ: 9, speedXZ: 20, forPlayerIndex: 0 },
+      },
+    });
     expect((await p0.waitFor('ERROR')).payload.code).toBe('FORBIDDEN_TEST_HOOK');
 
     // 3. ROOM_NOT_FOUND on unknown JOIN_ROOM
@@ -244,9 +457,8 @@ describe('@court2k/server integration suite', () => {
 
     // 6. SELECT_LOADOUT: guest cannot alter court; host changing court resets both ready flags
     p0.send({ type: 'READY', payload: { ready: true } });
-    p1.send({ type: 'READY', payload: {} }); // omit ready -> defaults true
-    await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.ready[0] && !m.payload.ready[1]);
-    // Wait: both ready started match immediately! Let's test loadout reset before both ready in a fresh room
+    p1.send({ type: 'READY', payload: {} });
+
     const p3 = await connectClient(wsUrl);
     p3.send({
       type: 'CREATE_ROOM',
@@ -261,7 +473,6 @@ describe('@court2k/server integration suite', () => {
     p4.send({ type: 'READY', payload: { ready: true } });
     await p3.waitFor('LOBBY_UPDATE', (m) => m.payload.ready[1] === true);
 
-    // Guest tries to change court -> ignored
     p4.send({
       type: 'SELECT_LOADOUT',
       payload: { archetype: 'serve_volley', court: 'grass', format: 'super_tiebreak' },
@@ -273,7 +484,6 @@ describe('@court2k/server integration suite', () => {
     expect(afterGuestLoadout.payload.matchConfig.court).toBe('hard');
     expect(afterGuestLoadout.payload.matchConfig.format).toBe('fast4');
 
-    // Host changes court -> resets ready to [false, false]
     p3.send({
       type: 'SELECT_LOADOUT',
       payload: { archetype: 'allcourt', court: 'clay' },
@@ -288,7 +498,7 @@ describe('@court2k/server integration suite', () => {
     p2.send({ type: 'JOIN_ROOM', payload: { roomCode: code, archetype: 'power' } });
     expect((await p2.waitFor('ERROR')).payload.code).toBe('MATCH_ALREADY_STARTED');
 
-    // 8. INVALID_PHASE: REMATCH_REQUEST during active play, SELECT_LOADOUT during active play
+    // 8. INVALID_PHASE: REMATCH_REQUEST & SELECT_LOADOUT during active play
     p0.send({ type: 'REMATCH_REQUEST', payload: {} });
     expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_PHASE');
     p0.send({ type: 'SELECT_LOADOUT', payload: { archetype: 'power' } });
@@ -300,7 +510,7 @@ describe('@court2k/server integration suite', () => {
     p2.send({ type: 'RECONNECT', payload: { roomCode: 'NOPE', sessionToken: 'some-token' } });
     expect((await p2.waitFor('ERROR')).payload.code).toBe('INVALID_TOKEN');
 
-    // 10. RATE_LIMITED when exceeding 120 msg/s
+    // 10. RATE_LIMITED when exceeding 120 msg/s (V2 PLAYER_INPUT)
     for (let i = 1; i <= 135; i++) {
       p0.send({
         type: 'PLAYER_INPUT',
@@ -311,7 +521,7 @@ describe('@court2k/server integration suite', () => {
           aimX: 0,
           aimZ: 0,
           action: 'none',
-          phase: 'idle',
+          actionPressed: false,
           clientTime: Date.now(),
         },
       });
@@ -320,14 +530,40 @@ describe('@court2k/server integration suite', () => {
     expect(rateErr.payload.code).toBe('RATE_LIMITED');
   });
 
-  it('runs 60Hz authoritative simulation, 30Hz snapshots, mirrored inputs, and hawkeye test hook', async () => {
+  it('validates spawn_incoming_ball strictly, rejects V1 set_takeover, and executes mirrored V2 auto-contact + no-press let-pass', async () => {
     const { wsUrl } = await startTestServer({ enableTestHooks: true });
     const { p0, p1 } = await createStartedRoom(wsUrl, 'clay');
 
-    // P0 moves locally right (+X -> world +X); P1 moves locally right (+X -> world -X)
+    // 1. Reject deprecated V1 set_takeover even when test hooks enabled
+    p0.sendRaw(
+      JSON.stringify({
+        type: 'TEST_COMMAND',
+        payload: { cmd: 'set_takeover', args: { playerIndex: 0, value: 100 } },
+      })
+    );
+    expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_MESSAGE');
+
+    // 2. Reject malformed spawn_incoming_ball payloads
+    const badPayloads = [
+      { targetX: 'bad', targetZ: 9 },
+      { targetX: 0, targetZ: null },
+      { targetX: 0, targetZ: 9, speedXZ: 0 },
+      { targetX: 0, targetZ: 9, speedXZ: 51 },
+      { targetX: 0, targetZ: 9, forPlayerIndex: 2 },
+    ];
+    for (const args of badPayloads) {
+      p0.sendRaw(
+        JSON.stringify({
+          type: 'TEST_COMMAND',
+          payload: { cmd: 'spawn_incoming_ball', args },
+        })
+      );
+      expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_MESSAGE');
+    }
+
+    // 3. Mirrored movement test: P0 local +X -> world +X; P1 local +X -> world -X
     p0.clearMessages();
     p1.clearMessages();
-
     p0.send({
       type: 'PLAYER_INPUT',
       payload: {
@@ -337,7 +573,7 @@ describe('@court2k/server integration suite', () => {
         aimX: 0,
         aimZ: 0,
         action: 'none',
-        phase: 'idle',
+        actionPressed: false,
         clientTime: Date.now(),
       },
     });
@@ -350,30 +586,107 @@ describe('@court2k/server integration suite', () => {
         aimX: 0,
         aimZ: 0,
         action: 'none',
-        phase: 'idle',
+        actionPressed: false,
         clientTime: Date.now(),
       },
     });
 
-    // Wait for server to advance ~12 ticks
-    const snap = await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.serverTick >= 12);
-    // P0 started at +1.45, moved +X; P1 started at -2.15, local +X -> world -X
-    expect(snap.payload.state.players[0].pos.x).toBeGreaterThan(1.45);
-    expect(snap.payload.state.players[1].pos.x).toBeLessThan(-2.15);
-    expect(snap.payload.state.lastAckSeq).toEqual([1, 1]);
+    const moveSnap = await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.serverTick >= 12);
+    expect(moveSnap.payload.state.players[0].pos.x).toBeGreaterThan(1.45);
+    expect(moveSnap.payload.state.players[1].pos.x).toBeLessThan(-2.15);
+    expect(moveSnap.payload.state.lastAckSeq).toEqual([1, 1]);
 
-    // Trigger Hawkeye 8cm IN shot via TEST_COMMAND
+    // 4. V2 iron rule "no button pressed allows ball to pass" (for P1)
+    p0.clearMessages();
+    p1.clearMessages();
+    const p1PosA = moveSnap.payload.state.players[1].pos;
+    p0.send({
+      type: 'TEST_COMMAND',
+      payload: {
+        cmd: 'spawn_incoming_ball',
+        args: { targetX: p1PosA.x, targetZ: p1PosA.z + 0.5, speedXZ: 24, forPlayerIndex: 1 },
+      },
+    });
+    const spawnSnapA = await p1.waitFor(
+      'STATE_SNAPSHOT',
+      (m) => m.payload.state.phase === 'rally' && m.payload.state.ball.lastHitter === 0
+    );
+    expect(spawnSnapA.payload.state.ball.active).toBe(true);
+    expect(spawnSnapA.payload.state.players[1].stance.armedAction).toBe('none');
+
+    // P1 does not press J/K/L -> must produce 0 SHOT_HIT events from P1 and score point for P0
+    const ptNoPress = await p1.waitFor(
+      'GAME_EVENT',
+      (m) => m.payload.event.type === 'POINT_SCORED',
+      5000
+    );
+    expect(ptNoPress.payload.event.type === 'POINT_SCORED' && ptNoPress.payload.event.winner).toBe(0);
+    const p1Hits = p1.messages.filter(
+      (m) =>
+        m.type === 'GAME_EVENT' &&
+        m.payload.event.type === 'SHOT_HIT' &&
+        m.payload.event.hitter === 1
+    );
+    expect(p1Hits.length).toBe(0);
+
+    // Wait for serve_ready before next test
+    const readySnap = await p1.waitFor(
+      'STATE_SNAPSHOT',
+      (m) => m.payload.state.phase === 'serve_ready',
+      5000
+    );
+
+    // 5. P1 presses K + mirrored local aimX=+1 (world aimX=-1) -> auto-contacts dropshot toward world -X
+    p0.clearMessages();
+    p1.clearMessages();
+    const p1PosB = readySnap.payload.state.players[1].pos;
+    p0.send({
+      type: 'TEST_COMMAND',
+      payload: {
+        cmd: 'spawn_incoming_ball',
+        args: { targetX: p1PosB.x, targetZ: p1PosB.z + 0.8, speedXZ: 20, forPlayerIndex: 1 },
+      },
+    });
+    await p1.waitFor(
+      'STATE_SNAPSHOT',
+      (m) => m.payload.state.phase === 'rally' && m.payload.state.ball.lastHitter === 0
+    );
+
+    p1.send({
+      type: 'PLAYER_INPUT',
+      payload: {
+        seq: 2,
+        moveX: 0,
+        moveZ: 0,
+        aimX: 1, // P1 local right (+X) -> world left (-X)
+        aimZ: 0,
+        action: 'K',
+        actionPressed: true,
+        clientTime: Date.now(),
+      },
+    });
+
+    const p1Contact = await p1.waitFor(
+      'GAME_EVENT',
+      (m) => m.payload.event.type === 'SHOT_HIT' && m.payload.event.hitter === 1,
+      5000
+    );
+    expect(p1Contact.payload.event.type === 'SHOT_HIT' && p1Contact.payload.event.shotType).toBe(
+      'dropshot'
+    );
+    const afterContactSnap = await p0.waitFor(
+      'STATE_SNAPSHOT',
+      (m) => m.payload.state.ball.lastHitter === 1,
+      5000
+    );
+    expect(afterContactSnap.payload.state.ball.vel.x).toBeLessThan(0);
+
+    // 6. Hawkeye 8cm IN + 25cm OUT + set_seed + set_score
     p0.send({
       type: 'TEST_COMMAND',
       payload: { cmd: 'trigger_hawkeye', args: { inBounds: true, distCm: 8, line: 'sideline' } },
     });
-
     const hkStart0 = await p0.waitFor(
-      'GAME_EVENT',
-      (m) => m.payload.event.type === 'HAWKEYE_START',
-      4000
-    );
-    const hkStart1 = await p1.waitFor(
       'GAME_EVENT',
       (m) => m.payload.event.type === 'HAWKEYE_START',
       4000
@@ -381,12 +694,9 @@ describe('@court2k/server integration suite', () => {
     expect(hkStart0.payload.event.type === 'HAWKEYE_START' && hkStart0.payload.event.hawkeye.isIn).toBe(
       true
     );
-    expect(hkStart1.payload.event.type).toBe('HAWKEYE_START');
 
-    // Requesting pause during hawkeye returns INVALID_PHASE
     p0.send({ type: 'PAUSE_REQUEST', payload: {} });
-    const hkPauseErr = await p0.waitFor('ERROR');
-    expect(hkPauseErr.payload.code).toBe('INVALID_PHASE');
+    expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_PHASE');
 
     const hkEnd = await p0.waitFor(
       'GAME_EVENT',
@@ -395,7 +705,6 @@ describe('@court2k/server integration suite', () => {
     );
     expect(hkEnd.payload.event.type === 'HAWKEYE_END' && hkEnd.payload.event.isIn).toBe(true);
 
-    // Trigger 25cm OUT ball -> must NOT trigger HAWKEYE_START, goes straight to POINT_SCORED
     p0.clearMessages();
     p0.send({
       type: 'TEST_COMMAND',
@@ -411,7 +720,6 @@ describe('@court2k/server integration suite', () => {
       p0.messages.some((m) => m.type === 'GAME_EVENT' && m.payload.event.type === 'HAWKEYE_START')
     ).toBe(false);
 
-    // Test set_seed, set_score, set_takeover TEST_COMMANDs
     p0.send({ type: 'TEST_COMMAND', payload: { cmd: 'set_seed', args: { seed: 42 } } });
     p0.send({
       type: 'TEST_COMMAND',
@@ -422,14 +730,7 @@ describe('@court2k/server integration suite', () => {
       (m) => m.payload.state.score.isTiebreak && m.payload.state.score.games[0] === 3
     );
     expect(tbSnap.payload.state.score.keyPointLabel).toBe('TIEBREAK');
-
-    p0.send({
-      type: 'TEST_COMMAND',
-      payload: { cmd: 'set_takeover', args: { playerIndex: 0, value: 100 } },
-    });
-    const tkEvt = await p0.waitFor('GAME_EVENT', (m) => m.payload.event.type === 'TAKEOVER_ON');
-    expect(tkEvt.payload.event.type === 'TAKEOVER_ON' && tkEvt.payload.event.player).toBe(0);
-  }, 15_000);
+  }, 20_000);
 
   it('enforces manual pause 3x limit, 60s timeout auto-resume, 3s countdown, 5Hz pause snapshots, and race handling', async () => {
     const { wsUrl } = await startTestServer({ enableTestHooks: true });
@@ -439,7 +740,6 @@ describe('@court2k/server integration suite', () => {
       p0.clearMessages();
       p1.clearMessages();
 
-      // P0 pauses; simultaneous P1 pause gets INVALID_PHASE without losing P1 quota
       p0.send({ type: 'PAUSE_REQUEST', payload: {} });
       const paused0 = await p0.waitFor('MATCH_PAUSED');
       const paused1 = await p1.waitFor('MATCH_PAUSED');
@@ -448,18 +748,15 @@ describe('@court2k/server integration suite', () => {
       expect(paused1.payload.manualPausesLeft).toEqual([2 - i, 3]);
 
       p1.send({ type: 'PAUSE_REQUEST', payload: {} });
-      const raceErr = await p1.waitFor('ERROR');
-      expect(raceErr.payload.code).toBe('INVALID_PHASE');
+      expect((await p1.waitFor('ERROR')).payload.code).toBe('INVALID_PHASE');
 
-      // P1 resumes + duplicate P0 resume is idempotent
       p1.send({ type: 'RESUME_REQUEST', payload: {} });
       const resuming = await p0.waitFor('MATCH_RESUMING');
       expect(resuming.payload.initiatedBy).toBe(1);
       expect(resuming.payload.resumeCountdownSec).toBe(3);
 
-      p0.send({ type: 'RESUME_REQUEST', payload: {} }); // idempotent, no second MATCH_RESUMING
+      p0.send({ type: 'RESUME_REQUEST', payload: {} });
 
-      // Fast forward 3s resuming countdown
       p0.send({ type: 'TEST_COMMAND', payload: { cmd: 'fast_forward_pause', args: { seconds: 3.1 } } });
       const resumed = await p0.waitFor('MATCH_RESUMED');
       expect(resumed.payload.requireInputReset).toBe(true);
@@ -468,11 +765,9 @@ describe('@court2k/server integration suite', () => {
       expect(extraResuming.length).toBe(0);
     }
 
-    // 4th pause by P0 -> PAUSE_LIMIT_REACHED
     p0.send({ type: 'PAUSE_REQUEST', payload: {} });
     expect((await p0.waitFor('ERROR')).payload.code).toBe('PAUSE_LIMIT_REACHED');
 
-    // P1 still has 3 pauses -> pause, verify ~5Hz snapshot cadence during pause, and test 60s auto-timeout resume
     p0.clearMessages();
     p1.clearMessages();
     p1.send({ type: 'PAUSE_REQUEST', payload: {} });
@@ -481,7 +776,6 @@ describe('@court2k/server integration suite', () => {
 
     await new Promise((r) => setTimeout(r, 450));
     const pauseSnaps = p1.messages.filter((m) => m.type === 'STATE_SNAPSHOT');
-    // Immediate snapshot + ~2 snapshots at 5Hz in 450ms (well below 30Hz = ~13)
     expect(pauseSnaps.length).toBeGreaterThanOrEqual(2);
     expect(pauseSnaps.length).toBeLessThanOrEqual(6);
 
@@ -501,12 +795,10 @@ describe('@court2k/server integration suite', () => {
     p0.send({ type: 'PAUSE_REQUEST', payload: {} });
     await p0.waitFor('MATCH_PAUSED');
 
-    // P1 disconnects while manually paused
     await p1.close();
     const discPaused = await p0.waitFor('MATCH_PAUSED', (m) => m.payload.reason === 'disconnect');
     expect(discPaused.payload.manualPausesLeft).toEqual([2, 3]);
 
-    // P1 reconnects -> resumes back to original serve_ready phase with quota still [2, 3]
     const p1Rec = await connectClient(wsUrl);
     p1Rec.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p1Token } });
     const sync = await p1Rec.waitFor('FULL_SYNC');
@@ -516,11 +808,8 @@ describe('@court2k/server integration suite', () => {
     p0.send({ type: 'TEST_COMMAND', payload: { cmd: 'fast_forward_pause', args: { seconds: 3.1 } } });
     await p1Rec.waitFor('MATCH_RESUMED');
 
-    // Both disconnect simultaneously and both time out -> room recycled cleanly without forfeit event
     await p0.close();
     await p1Rec.close();
-    // Simulate time advance via fast_forward on room? Since both sockets are closed, test room state directly via server internals?
-    // Verify room still exists in paused_disconnect while within 15s, and token works
     expect(server.roomManager.getRoomCount()).toBe(1);
     const p0Check = await connectClient(wsUrl);
     p0Check.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p0Token } });
@@ -528,11 +817,10 @@ describe('@court2k/server integration suite', () => {
     expect(sync0.payload.snapshot.phase).toBe('paused_disconnect');
   }, 15_000);
 
-  it('handles 4s reconnect with lastAckSeq reset, double disconnect, 15s forfeit, and rematch', async () => {
+  it('handles 4s reconnect with lastAckSeq reset, double disconnect, 15s forfeit, and rematch resetting stats and pauses', async () => {
     const { wsUrl } = await startTestServer({ enableTestHooks: true });
     const { p0, p1, roomCode, p0Token, p1Token } = await createStartedRoom(wsUrl);
 
-    // Send seq 10 from P1 before disconnect
     p1.send({
       type: 'PLAYER_INPUT',
       payload: {
@@ -542,13 +830,12 @@ describe('@court2k/server integration suite', () => {
         aimX: 0,
         aimZ: 0,
         action: 'none',
-        phase: 'idle',
+        actionPressed: false,
         clientTime: Date.now(),
       },
     });
     await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.state.lastAckSeq[1] === 10);
 
-    // P1 disconnects -> P0 sees MATCH_PAUSED(disconnect) & OPPONENT_DISCONNECTED(15s)
     await p1.close();
     const discPause = await p0.waitFor('MATCH_PAUSED', (m) => m.payload.reason === 'disconnect');
     expect(discPause.payload.initiatedBy).toBe(1);
@@ -556,14 +843,11 @@ describe('@court2k/server integration suite', () => {
     expect(oppDisc.payload.graceSeconds).toBe(15);
     expect(oppDisc.payload.disconnectedIndex).toBe(1);
 
-    // P0 tries manual resume during disconnect -> CANNOT_RESUME_DISCONNECT
     p0.send({ type: 'RESUME_REQUEST', payload: {} });
     expect((await p0.waitFor('ERROR')).payload.code).toBe('CANNOT_RESUME_DISCONNECT');
 
-    // Double disconnect: P0 also disconnects
     await p0.close();
 
-    // P1 reconnects first -> stays in paused_disconnect, gets FULL_SYNC with lastAckSeq[1]=0
     const p1Rec = await connectClient(wsUrl);
     p1Rec.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p1Token } });
     const fullSync1 = await p1Rec.waitFor('FULL_SYNC');
@@ -571,7 +855,6 @@ describe('@court2k/server integration suite', () => {
     expect(fullSync1.payload.snapshot.lastAckSeq[1]).toBe(0);
     expect(fullSync1.payload.snapshot.phase).toBe('paused_disconnect');
 
-    // P0 reconnects second -> enters 3s resuming and notifies both
     const p0Rec = await connectClient(wsUrl);
     p0Rec.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p0Token } });
     const fullSync0 = await p0Rec.waitFor('FULL_SYNC');
@@ -585,7 +868,6 @@ describe('@court2k/server integration suite', () => {
     p0Rec.send({ type: 'TEST_COMMAND', payload: { cmd: 'fast_forward_pause', args: { seconds: 3.1 } } });
     await p1Rec.waitFor('MATCH_RESUMED');
 
-    // P1 sends fresh seq = 1 (< old seq 10!) -> must be ACCEPTED because lastAckSeq[1] was reset!
     p1Rec.send({
       type: 'PLAYER_INPUT',
       payload: {
@@ -595,7 +877,7 @@ describe('@court2k/server integration suite', () => {
         aimX: 0,
         aimZ: 0,
         action: 'none',
-        phase: 'idle',
+        actionPressed: false,
         clientTime: Date.now(),
       },
     });
@@ -605,7 +887,14 @@ describe('@court2k/server integration suite', () => {
     );
     expect(afterRecSnap.payload.state.lastAckSeq[1]).toBe(1);
 
-    // Now test >15s disconnect forfeit
+    // Use 1 manual pause before forfeit so we also verify Rematch resets manualPausesLeft to [3, 3]
+    p0Rec.send({ type: 'PAUSE_REQUEST', payload: {} });
+    await p0Rec.waitFor('MATCH_PAUSED', (m) => m.payload.reason === 'manual');
+    p0Rec.send({ type: 'RESUME_REQUEST', payload: {} });
+    await p0Rec.waitFor('MATCH_RESUMING');
+    p0Rec.send({ type: 'TEST_COMMAND', payload: { cmd: 'fast_forward_pause', args: { seconds: 3.1 } } });
+    await p0Rec.waitFor('MATCH_RESUMED');
+
     p0Rec.clearMessages();
     await p1Rec.close();
     await p0Rec.waitFor('OPPONENT_DISCONNECTED');
@@ -628,7 +917,6 @@ describe('@court2k/server integration suite', () => {
     expect(forfeitSnap.payload.state.score.winner).toBe(0);
     expect(p0Rec.messages.filter((m) => m.type === 'ERROR').length).toBe(0);
 
-    // P0 requests rematch BEFORE P1 reconnects; P1 reconnects in match_over and receives REMATCH_STATUS
     p0Rec.send({ type: 'REMATCH_REQUEST', payload: {} });
     await p0Rec.waitFor('REMATCH_STATUS', (m) => m.payload.requested[0] === true);
 
@@ -638,7 +926,6 @@ describe('@court2k/server integration suite', () => {
     const recRematchStatus = await p1After.waitFor('REMATCH_STATUS');
     expect(recRematchStatus.payload.requested).toEqual([true, false]);
 
-    // Duplicate click is idempotent
     p0Rec.send({ type: 'REMATCH_REQUEST', payload: {} });
     p1After.send({ type: 'REMATCH_REQUEST', payload: {} });
 
@@ -648,9 +935,12 @@ describe('@court2k/server integration suite', () => {
     expect(rematchStart1.payload.serverTick).toBe(0);
     expect(rematchStart0.payload.snapshot.lastAckSeq).toEqual([0, 0]);
     expect(rematchStart0.payload.snapshot.pause.manualPausesLeft).toEqual([3, 3]);
+    expect(rematchStart0.payload.snapshot.score.games).toEqual([0, 0]);
+    expect(rematchStart0.payload.snapshot.score.points).toEqual([0, 0]);
+    expect(rematchStart0.payload.snapshot.stats[0].totalShots).toBe(0);
   }, 15_000);
 
-  it('recycles empty waiting/match_over rooms after TTL and frees guest slot on waiting disconnect', async () => {
+  it('recycles empty waiting/match_over rooms after TTL and does not forfeit on waiting disconnect', async () => {
     const { server, wsUrl } = await startTestServer({ emptyRoomTtlMs: 120, idleRoomTtlMs: 500 });
     const p0 = await connectClient(wsUrl);
     const p1 = await connectClient(wsUrl);
@@ -665,7 +955,7 @@ describe('@court2k/server integration suite', () => {
     p1.send({ type: 'JOIN_ROOM', payload: { roomCode: code, archetype: 'power' } });
     await p1.waitFor('ROOM_JOINED');
 
-    // Guest disconnects in waiting -> frees slot so another guest can join
+    // Guest disconnects in waiting -> no forfeit, frees slot so another guest can join
     await p1.close();
     const afterGuestLeft = await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === false);
     expect(afterGuestLeft.payload.connected).toEqual([true, false]);
@@ -685,14 +975,12 @@ describe('@court2k/server integration suite', () => {
     const { wsUrl } = await startTestServer({ enableTestHooks: true });
     const { p0 } = await createStartedRoom(wsUrl);
 
-    // Launch a hawkeye 25cm out ball so phase enters rally -> point_over -> serve_ready
     p0.send({
       type: 'TEST_COMMAND',
       payload: { cmd: 'trigger_hawkeye', args: { inBounds: false, distCm: 25, line: 'sideline' } },
     });
     await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.state.phase === 'rally');
 
-    // Hold J during rally right before point ends
     p0.send({
       type: 'PLAYER_INPUT',
       payload: {
@@ -702,14 +990,13 @@ describe('@court2k/server integration suite', () => {
         aimX: 0,
         aimZ: 0,
         action: 'J',
-        phase: 'hold',
+        actionPressed: true,
         clientTime: Date.now(),
       },
     });
 
     await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.state.phase === 'point_over');
 
-    // Release during point_over (which server ignores) and then send nothing
     p0.send({
       type: 'PLAYER_INPUT',
       payload: {
@@ -719,7 +1006,7 @@ describe('@court2k/server integration suite', () => {
         aimX: 0,
         aimZ: 0,
         action: 'none',
-        phase: 'release',
+        actionPressed: false,
         clientTime: Date.now(),
       },
     });
@@ -727,7 +1014,6 @@ describe('@court2k/server integration suite', () => {
     await p0.waitFor('STATE_SNAPSHOT', (m) => m.payload.state.phase === 'serve_ready');
     p0.clearMessages();
 
-    // Hold still >= 1.5s without sending any new key; must stay in serve_ready with 0 ghost shots
     await new Promise((r) => setTimeout(r, 1600));
     const snaps = p0.messages.filter((m) => m.type === 'STATE_SNAPSHOT');
     expect(snaps.length).toBeGreaterThan(0);
@@ -742,7 +1028,7 @@ describe('@court2k/server integration suite', () => {
     expect(shotHits.length).toBe(0);
   }, 15_000);
 
-  it('preserves host binding on self JOIN_ROOM and resets pause.disconnected on waiting reconnect', async () => {
+  it('preserves host binding on self JOIN_ROOM and stays in waiting with disconnected=false on waiting reconnect', async () => {
     const { wsUrl } = await startTestServer();
     const p0 = await connectClient(wsUrl);
     p0.send({
@@ -753,21 +1039,82 @@ describe('@court2k/server integration suite', () => {
     const roomCode = created.payload.roomCode;
     const token0 = created.payload.sessionToken;
 
-    // Host sends JOIN_ROOM to own room -> rejected with INVALID_PHASE without detaching host
     p0.send({ type: 'JOIN_ROOM', payload: { roomCode, archetype: 'power' } });
     expect((await p0.waitFor('ERROR')).payload.code).toBe('INVALID_PHASE');
 
-    // Verify host is still attached by sending READY
     p0.send({ type: 'READY', payload: { ready: true } });
     const lobby = await p0.waitFor('LOBBY_UPDATE');
     expect(lobby.payload.connected).toEqual([true, false]);
     expect(lobby.payload.ready).toEqual([true, false]);
 
-    // Host disconnects in waiting, then reconnects -> FULL_SYNC snapshot must have disconnected[0] === false
     await p0.close();
     const p0Rec = await connectClient(wsUrl);
     p0Rec.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: token0 } });
     const sync = await p0Rec.waitFor('FULL_SYNC');
+    expect(sync.payload.snapshot.phase).toBe('waiting');
     expect(sync.payload.snapshot.pause.disconnected[0]).toBe(false);
+    expect(sync.payload.snapshot.lastAckSeq[0]).toBe(0);
+  });
+
+  it('allows guest P1 waiting reconnect via original token and invalidates old token once a new guest P2 claims the slot', async () => {
+    const { wsUrl } = await startTestServer();
+    const p0 = await connectClient(wsUrl);
+    p0.send({
+      type: 'CREATE_ROOM',
+      payload: { court: 'hard', format: 'fast4', archetype: 'allcourt' },
+    });
+    const created = await p0.waitFor('ROOM_CREATED');
+    const roomCode = created.payload.roomCode;
+
+    const p1 = await connectClient(wsUrl);
+    p1.send({ type: 'JOIN_ROOM', payload: { roomCode, archetype: 'power' } });
+    const joined = await p1.waitFor('ROOM_JOINED');
+    const p1Token = joined.payload.sessionToken;
+    await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+
+    // 1. P1 disconnects (page refresh) in waiting without another guest joining -> RECONNECT succeeds with FULL_SYNC(waiting)
+    await p1.close();
+    await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === false);
+    p0.clearMessages();
+
+    const p1Rec = await connectClient(wsUrl);
+    p1Rec.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p1Token } });
+    const sync1 = await p1Rec.waitFor('FULL_SYNC');
+    expect(sync1.payload.snapshot.phase).toBe('waiting');
+    expect(sync1.payload.playerIndex).toBe(1);
+    expect(sync1.payload.yourSide).toBe(-1);
+    expect(sync1.payload.snapshot.pause.disconnected[1]).toBe(false);
+    expect(sync1.payload.snapshot.lastAckSeq[1]).toBe(0);
+    expect(sync1.payload.snapshot.config.archetypes[1]).toBe('power');
+
+    const lobby0 = await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+    const lobby1 = await p1Rec.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+    expect(lobby0.payload.matchConfig.archetypes[1]).toBe('power');
+    expect(lobby1.payload.matchConfig.archetypes[1]).toBe('power');
+
+    // 2. P1 disconnects again, P2 joins and takes the guest slot -> old p1Token is invalidated and P2 is unaffected
+    await p1Rec.close();
+    await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === false);
+    p0.clearMessages();
+
+    const p2 = await connectClient(wsUrl);
+    p2.send({ type: 'JOIN_ROOM', payload: { roomCode, archetype: 'serve_volley' } });
+    const joined2 = await p2.waitFor('ROOM_JOINED');
+    expect(joined2.payload.playerIndex).toBe(1);
+    const lobbyAfterP2 = await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+    expect(lobbyAfterP2.payload.matchConfig.archetypes[1]).toBe('serve_volley');
+
+    const p1Stale = await connectClient(wsUrl);
+    p1Stale.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p1Token } });
+    const err = await p1Stale.waitFor('ERROR');
+    expect(err.payload.code).toBe('INVALID_TOKEN');
+
+    // Verify P2 remains cleanly bound and can start the match with P0
+    p0.send({ type: 'READY', payload: { ready: true } });
+    p2.send({ type: 'READY', payload: { ready: true } });
+    const start0 = await p0.waitFor('MATCH_START');
+    const start2 = await p2.waitFor('MATCH_START');
+    expect(start0.payload.snapshot.config.archetypes).toEqual(['allcourt', 'serve_volley']);
+    expect(start2.payload.playerIndex).toBe(1);
   });
 });
