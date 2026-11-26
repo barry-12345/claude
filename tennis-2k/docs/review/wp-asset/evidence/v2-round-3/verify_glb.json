@@ -1,0 +1,49 @@
+{
+  "file_kb": 344.17,
+  "bones_count": 21,
+  "attachments_count": 6,
+  "materials_total": 14,
+  "required_materials_present": 10,
+  "animations": {
+    "idle": 1.2,
+    "run": 0.56,
+    "slide": 0.5,
+    "serve_toss": 0.35,
+    "forehand": 0.36,
+    "backhand": 0.36,
+    "lob": 0.4,
+    "celebrate": 1.0
+  },
+  "scale_channels_count": 0,
+  "total_file_tris": 5500,
+  "tris_by_node": {
+    "Headgear_CapBackwards": 184,
+    "Headgear_Headband": 328,
+    "Headgear_Visor": 348,
+    "Wristband_L": 92,
+    "Racquet": 512,
+    "Wristband_R": 92,
+    "Avatar_Body": 3944
+  },
+  "visible_tris": {
+    "power": 4968,
+    "allcourt": 4640,
+    "serve_volley": 4804,
+    "defender": 4640
+  },
+  "max_visible_draw_calls": 17,
+  "prims_by_node": {
+    "Headgear_CapBackwards": 2,
+    "Headgear_Headband": 1,
+    "Headgear_Visor": 2,
+    "Wristband_L": 1,
+    "Racquet": 3,
+    "Wristband_R": 1,
+    "Avatar_Body": 11
+  },
+  "height_m": 1.7573,
+  "min_y_m": 0.0,
+  "visor_min_z": -0.2055,
+  "cap_max_z": 0.2263,
+  "racquet_center_x": 0.6846
+}
