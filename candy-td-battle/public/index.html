@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>糖果塔防对战 · Candy TD Battle</title>
+  <title>糖果塔防对战 · Candy TD Battle V2</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🍬</text></svg>" />
   <link rel="stylesheet" href="./css/style.css" />
 </head>
@@ -21,7 +21,7 @@
           </div>
           <div class="hud-pill pill-gold" title="当前金币">
             <span class="pill-icon">💰</span>
-            <span id="hud-self-gold">$320</span>
+            <span id="hud-self-gold">$190</span>
           </div>
           <div class="hud-pill pill-eco" title="每 6 秒发放永久经济">
             <span class="pill-icon">📈</span>
@@ -30,7 +30,11 @@
           </div>
           <div class="hud-pill pill-wave" id="hud-wave-pill">
             <span class="pill-icon">🌊</span>
-            <span id="hud-wave-text">准备中 · 5s</span>
+            <span id="hud-wave-text">开战准备 · 5s</span>
+          </div>
+          <div class="hud-pill pill-map" id="hud-map-pill" title="本局对战地图">
+            <span class="pill-icon">🗺️</span>
+            <span id="hud-map-name">经典 S 弯</span>
           </div>
         </div>
 
@@ -50,16 +54,16 @@
 
         <div class="hud-actions">
           <button id="btn-mute" class="icon-btn" title="音效开关">🔊</button>
-          <button id="btn-help" class="icon-btn" title="玩法说明">❓</button>
+          <button id="btn-help" class="icon-btn" title="玩法与图鉴">❓</button>
         </div>
       </header>
 
-      <!-- Peek Banner (visible when peeking) -->
+      <!-- Locked Opponent View Banner -->
       <div id="peek-banner" class="peek-banner hidden">
-        👀 正在偷看对手战场（移开鼠标或松开 Space 立即回防）
+        👀 已锁定对手视角（移入最左边缘 / Space / Esc / 1-4 回防）
       </div>
 
-      <!-- Incoming Express Alert Banner -->
+      <!-- Incoming Express Alert Banner (2A with icon) -->
       <div id="incoming-express-banner" class="express-banner hidden"></div>
 
       <!-- Overtime Banner -->
@@ -67,10 +71,19 @@
         🌈 糖果狂热加时赛！第 <span id="overtime-wave-num">16</span> 波彩虹大军来袭！
       </div>
 
-      <!-- Right Edge Peek Hotzone (x: 1204..1276, y: 180..540) -->
-      <div id="peek-zone" class="peek-zone hidden" title="悬停或按住 Space 偷看对手布局">
+      <!-- Right Edge Hotzone (x: 1216..1276, y: 180..540) — only visible in self view -->
+      <div id="peek-zone-right" class="peek-zone peek-zone-right hidden" title="移入右侧或按 Space 锁定查看对手战场">
         <span class="peek-eye">👀</span>
-        <span class="peek-label">偷<br />看<br />对<br />手</span>
+        <span class="peek-label">查<br />看<br />对<br />手</span>
+        <span class="peek-arrow">→</span>
+        <span class="peek-kbd">Space</span>
+      </div>
+
+      <!-- Left Edge Hotzone (x: 4..64, y: 180..540) — only visible in opponent view -->
+      <div id="peek-zone-left" class="peek-zone peek-zone-left hidden" title="移入左侧或按 Space/Esc/1-4 返回己方战场">
+        <span class="peek-arrow">←</span>
+        <span class="peek-label">返<br />回<br />己<br />方</span>
+        <span class="peek-eye">🏠</span>
         <span class="peek-kbd">Space</span>
       </div>
 
@@ -80,27 +93,56 @@
           <span id="tp-title">草莓豆豆炮 Lv.1</span>
           <button id="tp-close" class="tp-close" aria-label="关闭">×</button>
         </div>
-        <div id="tp-stats" class="tp-stats">射程 145 · 伤 12 · 2.4/s</div>
+        <div id="tp-buff-badge" class="tp-buff-badge hidden"></div>
+        <div id="tp-stats" class="tp-stats">射程 150 · 伤 11 · 2.6/s</div>
         <div class="tp-targeting">
           <span>索敌:</span>
           <button class="tgt-btn" data-target="first">最前</button>
           <button class="tgt-btn" data-target="strong">血厚</button>
           <button class="tgt-btn" data-target="close">最近</button>
         </div>
-        <div class="tp-actions">
+
+        <!-- Lv1 -> Lv2 or Lv3 maxed single upgrade row -->
+        <div id="tp-upgrade-single" class="tp-actions">
           <button id="tp-upgrade" class="tp-btn tp-upgrade">升级 $75</button>
+        </div>
+
+        <!-- Lv2 -> Lv3 Dual Branch Evolution Cards -->
+        <div id="tp-branch-grid" class="tp-branch-grid hidden">
+          <button id="tp-branch-a" class="branch-card branch-a" data-branch="A"></button>
+          <button id="tp-branch-b" class="branch-card branch-b" data-branch="B"></button>
+        </div>
+
+        <div class="tp-sell-row">
           <button id="tp-sell" class="tp-btn tp-sell">出售 +$56</button>
         </div>
       </div>
 
+      <!-- Obstacle Demolition Floating Card (1B explicit buff preview) -->
+      <div id="obstacle-popover" class="obstacle-popover hidden">
+        <div class="tp-header">
+          <span id="op-title">🍭 棒棒糖树</span>
+          <button id="op-close" class="tp-close" aria-label="关闭">×</button>
+        </div>
+        <div id="op-buff-preview" class="op-buff-preview">解锁：🎯 射程晶格（+20% 射程）</div>
+        <div class="op-tip">拆除后本局永久保留该增益地砖，可随时建塔或改建。</div>
+        <button id="op-demolish" class="tp-btn op-demolish">💰 拆迁 $60</button>
+      </div>
+
+      <!-- Read-only Opponent Tower Hover Card -->
+      <div id="opponent-tower-card" class="opponent-tower-card hidden"></div>
+
+      <!-- Shared Bottom Card Hover Tooltip (pointer-events: none) -->
+      <div id="action-tooltip" class="action-tooltip hidden"></div>
+
       <!-- Bottom Dual Console (y: 584..712) -->
       <footer id="bottom-console" class="bottom-console hidden">
         <section class="console-build" aria-label="建造糖果塔">
-          <div class="console-section-title">🍬 建塔防御（快捷键 1-4，右键/Esc取消）</div>
+          <div class="console-section-title">🍬 建塔防御（快捷键 1-4，悬停看分支，右键/Esc取消）</div>
           <div id="tower-cards" class="tower-cards"></div>
         </section>
-        <section class="console-send" aria-label="进攻派怪与快递">
-          <div class="console-section-title">🚀 进攻派怪 &amp; 快递心理战（赚永久 Eco · Q/W/E/R/T/F）</div>
+        <section class="console-send" aria-label="暗袭派怪部队">
+          <div class="console-section-title">👾 暗黑霓虹突袭（永久涨 Eco · 防卫 $0 赏金 · 快捷键 Q/W/E/R/T）</div>
           <div id="send-cards" class="send-cards"></div>
         </section>
       </footer>
@@ -115,9 +157,9 @@
       <div id="lobby-overlay" class="modal-overlay">
         <div class="lobby-card">
           <div class="lobby-hero">
-            <div class="candy-badge">🍬 Candy TD Battle V1</div>
+            <div class="candy-badge">🍬 Candy TD Battle V2</div>
             <h1>糖果塔防对战</h1>
-            <p class="lobby-subtitle">高颜值马卡龙 1v1 实时策略对战 · 建塔守糖果 · 派怪抢经济 · 假动作快递斗智</p>
+            <p class="lobby-subtitle">8 张主题甜品地图 · Lv3 双分支转职 · 明牌增益拆迁 · 5 大暗黑霓虹特种军团</p>
           </div>
 
           <!-- Entry View -->
@@ -128,6 +170,14 @@
             <div class="nick-row">
               <label for="input-nickname">我的昵称</label>
               <input id="input-nickname" type="text" maxlength="20" placeholder="草莓甜心" value="草莓甜心" />
+            </div>
+
+            <div class="map-picker-section">
+              <div class="map-picker-header">
+                <span>🗺️ 选择对战地图（含 4 明牌增益障碍）</span>
+                <span id="lobby-map-desc" class="map-picker-desc">每局随机抽取 8 张风味糖果路线之一</span>
+              </div>
+              <div id="lobby-map-picker" class="map-picker-grid"></div>
             </div>
 
             <div class="mode-grid">
@@ -143,7 +193,7 @@
 
               <div class="mode-box mode-ai">
                 <h3>🤖 单人 AI 陪练</h3>
-                <p>零等待立即开练！AI 与玩家同规则公平运营</p>
+                <p>零等待立即开练！AI 动态评分选点与反制派怪</p>
                 <div class="ai-buttons">
                   <button id="btn-ai-casual" class="btn-mint">🌸 休闲甜心 AI</button>
                   <button id="btn-ai-clever" class="btn-peach">🦊 狡黠狐狸 AI</button>
@@ -160,6 +210,14 @@
                 <strong id="lobby-room-code" class="rc-value">----</strong>
               </div>
               <button id="btn-copy-link" class="btn-secondary">🔗 一键复制邀请链接</button>
+            </div>
+
+            <div class="map-picker-section">
+              <div class="map-picker-header">
+                <span>🗺️ 本房地图</span>
+                <span id="room-map-hint" class="map-picker-desc">房主可切换地图</span>
+              </div>
+              <div id="room-map-picker" class="map-picker-grid"></div>
             </div>
 
             <div class="slots-grid">
@@ -193,7 +251,7 @@
             <div class="countdown-circle">
               <span id="countdown-num">3</span>
             </div>
-            <p class="countdown-tip">糖果小车装填中，即将同步开战！</p>
+            <p class="countdown-tip">糖果小车装填中 · 地图：<strong id="countdown-map-name">经典 S 弯</strong></p>
           </div>
         </div>
       </div>
@@ -222,19 +280,21 @@
         </div>
       </div>
 
-      <!-- Help Modal -->
+      <!-- Help & Codex Modal (3 Tabs, anytime toggleable) -->
       <div id="help-overlay" class="modal-overlay hidden">
         <div class="help-card">
           <div class="help-header">
-            <h2>🍬 糖果塔防对战 · 快速指南</h2>
-            <button id="btn-close-help" class="tp-close">×</button>
+            <h2>🍬 糖果塔防 V2 · 玩法与怪物图鉴</h2>
+            <button id="btn-close-help" class="tp-close" aria-label="关闭">×</button>
           </div>
-          <ul class="help-list">
-            <li><b>建塔防御（左下 1-4）</b>：草莓炮速射清杂、薄荷冰范围减速（Lv3 附带 +15% 易伤）、爆米花群伤、柠檬狙专克太妃硬糖与蛋糕王！</li>
-            <li><b>派怪涨 Eco（右下 Q/W/E/R/T/F）</b>：派怪给对手可永久增加每 6 秒发放的 Eco 经济！</li>
-            <li><b>3 秒快递 &amp; 假动作心理战</b>：真快递与 🎩 假动作在 3 秒内对对手完全同款警报！假动作只喷彩带零伤害，却能稳赚 +5 Eco 骗对手乱花钱。</li>
-            <li><b>防误触偷看对手</b>：鼠标移至最右侧「👀 偷看对手」胶囊或按住 <code>Space</code> 键平滑查看对手阵地（偷看时禁用地图点击防误建）。</li>
-          </ul>
+          <div class="help-tabs">
+            <button class="help-tab-btn active" data-help-tab="rules">📖 玩法速览</button>
+            <button class="help-tab-btn" data-help-tab="towers">🗼 防御塔速查</button>
+            <button class="help-tab-btn" data-help-tab="creeps">👾 怪物图鉴</button>
+          </div>
+          <div id="help-tab-rules" class="help-tab-panel"></div>
+          <div id="help-tab-towers" class="help-tab-panel hidden"></div>
+          <div id="help-tab-creeps" class="help-tab-panel hidden"></div>
         </div>
       </div>
     </div>

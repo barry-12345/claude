@@ -1,4 +1,4 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from './shared/constants.js';
+import { CANVAS_HEIGHT, CANVAS_WIDTH, cellKey } from './shared/constants.js';
 import { CandyAudio } from './audio.js';
 import { NetClient } from './net-client.js';
 import { CandyRenderer } from './renderer.js';
@@ -12,7 +12,8 @@ const inviteRoomCode = params.get('room');
 
 const stage = document.getElementById('stage');
 const canvas = document.getElementById('game-canvas');
-const peekZone = document.getElementById('peek-zone');
+const rightZone = document.getElementById('peek-zone-right');
+const leftZone = document.getElementById('peek-zone-left');
 
 function fitStageToViewport() {
   const vw = window.innerWidth;
@@ -48,14 +49,14 @@ const ui = new CandyUI({
   audio,
   renderer,
   callbacks: {
-    async onCreateRoom({ mode, aiDifficulty, nickname }) {
+    async onCreateRoom({ mode, aiDifficulty, nickname, mapId }) {
       if (lobbyConnecting) return;
       lobbyConnecting = true;
       ui.setLobbyConnecting(true, '连接中...');
       try {
         await net.connect();
         net.saveSession({ nickname });
-        const sent = net.send({ type: 'create_room', mode, aiDifficulty, nickname });
+        const sent = net.send({ type: 'create_room', mode, aiDifficulty, nickname, mapId });
         if (!sent) {
           ui.showToast('连接尚未就绪，请重试');
         }
@@ -84,18 +85,46 @@ const ui = new CandyUI({
         ui.setLobbyConnecting(false);
       }
     },
+    onSelectMap(mapId) {
+      net.send({ type: 'select_map', mapId });
+    },
     onSelectBuild(type) {
       renderer.selectedBuildType = type;
-      if (type) renderer.selectedTowerId = null;
+      if (type) {
+        renderer.selectedTowerId = null;
+        renderer.selectedObstacleKey = null;
+      }
       ui.setSelectedBuild(type);
-      if (type) ui.setSelectedTower(null);
+      if (type) {
+        ui.setSelectedTower(null);
+        ui.setSelectedObstacle(null);
+      }
     },
     onSelectTower(tower) {
       renderer.selectedTowerId = tower ? tower.id : null;
+      if (tower) renderer.selectedObstacleKey = null;
       ui.setSelectedTower(tower);
+    },
+    onSelectObstacle(obs) {
+      renderer.selectedObstacleKey = obs ? cellKey(obs.col, obs.row) : null;
+      if (obs) renderer.selectedTowerId = null;
+      ui.setSelectedObstacle(obs);
+    },
+    onUpgradeTower(towerId, branch) {
+      net.send({
+        type: 'upgrade_tower',
+        towerId,
+        ...(branch ? { branch } : {})
+      });
+    },
+    onDemolishObstacle(col, row) {
+      net.send({ type: 'demolish_obstacle', col, row });
     },
     onSendWave(sendType) {
       net.send({ type: 'send_wave', sendType });
+    },
+    onReturnSelfView() {
+      input.setViewMode('self');
     },
     onReturnHome() {
       net.send({ type: 'leave_room' });
@@ -113,26 +142,51 @@ const ui = new CandyUI({
 const input = new InputController({
   canvas,
   stage,
-  peekZone,
+  rightZone,
+  leftZone,
   renderer,
   onSelectBuild(type) {
     renderer.selectedBuildType = type;
-    if (type) renderer.selectedTowerId = null;
+    if (type) {
+      renderer.selectedTowerId = null;
+      renderer.selectedObstacleKey = null;
+    }
     ui.setSelectedBuild(type);
-    if (type) ui.setSelectedTower(null);
+    if (type) {
+      ui.setSelectedTower(null);
+      ui.setSelectedObstacle(null);
+    }
   },
   onPlaceTower(towerType, col, row) {
     net.send({ type: 'place_tower', towerType, col, row });
   },
   onSelectTower(tower) {
     renderer.selectedTowerId = tower ? tower.id : null;
+    if (tower) renderer.selectedObstacleKey = null;
     ui.setSelectedTower(tower);
+  },
+  onSelectObstacle(obs) {
+    renderer.selectedObstacleKey = obs ? cellKey(obs.col, obs.row) : null;
+    if (obs) renderer.selectedTowerId = null;
+    ui.setSelectedObstacle(obs);
+  },
+  onHoverOpponentTower(tower, pt) {
+    ui.showOpponentTowerCard(tower, pt);
   },
   onSendWave(sendType) {
     net.send({ type: 'send_wave', sendType });
   },
-  onPeekChange(active) {
-    ui.setPeekBanner(active);
+  onViewModeChange(mode) {
+    ui.setViewMode(mode);
+  },
+  onToggleHelp() {
+    ui.toggleHelp();
+  },
+  onCloseHelp() {
+    ui.closeHelp();
+  },
+  isHelpOpen() {
+    return ui.helpOpen;
   },
   onUnlockAudio() {
     audio.unlock();
@@ -142,6 +196,9 @@ const input = new InputController({
 net.handlers.onRoomState = (state) => {
   latestRoomState = state;
   renderer.setPlayerSlot(state.playerSlot);
+  if (state.resolvedMapId) {
+    renderer.setMapId(state.resolvedMapId);
+  }
   if (state.phase === 'COUNTDOWN') {
     matchEndAudioPlayed = false;
     renderer.resetMatchState();
@@ -179,13 +236,15 @@ net.handlers.onEvents = (events) => {
   for (const ev of events) {
     if (ev.type === 'tower_built') playOnce('build');
     else if (ev.type === 'tower_upgraded') playOnce('upgrade');
+    else if (ev.type === 'obstacle_demolished' && ev.slot === mySlot) playOnce('demolish');
     else if (ev.type === 'tower_sold' || ev.type === 'eco_payout') playOnce('coin');
     else if (ev.type === 'express_started') playOnce('express_honk');
-    else if (ev.type === 'express_arrived_feint') {
-      if (ev.targetSlot === mySlot || renderer.isPeekingProtected()) {
-        playOnce('feint_laugh');
-      }
-    } else if (ev.type === 'life_lost' && ev.slot === mySlot) {
+    else if (ev.type === 'shield_hit' && ev.slot === mySlot) playOnce('shield_hit');
+    else if (ev.type === 'shield_break' && ev.slot === mySlot) playOnce('shield_break');
+    else if (ev.type === 'frost_nova' && ev.slot === mySlot) playOnce('frost_nova');
+    else if (ev.type === 'healer_pulse' && ev.slot === mySlot) playOnce('heal_pulse');
+    else if (ev.type === 'execute_hit' && ev.slot === mySlot) playOnce('execute');
+    else if (ev.type === 'life_lost' && ev.slot === mySlot) {
       playOnce('hurt');
     } else if (ev.type === 'match_ended' && ev.endedResult) {
       maybePlayMatchEndAudio(ev.endedResult);
@@ -247,7 +306,6 @@ net.handlers.onConnectionChange = (connected) => {
     return;
   }
 
-  // Only attempt reconnect if same room (or no different ?room= invite override)
   if (saved.roomCode && saved.reconnectToken && (!inviteRoomCode || inviteRoomCode.toUpperCase() === saved.roomCode)) {
     try {
       await net.connect();
@@ -296,6 +354,17 @@ if (testModeEnabled) {
         muted: audio.muted,
         state: audio.ctx ? audio.ctx.state : 'uninitialized',
         events: audio.eventLog.slice(-50)
+      };
+    },
+    getViewState() {
+      return {
+        viewMode: input.viewMode,
+        peekProgress: Number(renderer.peekProgress.toFixed(3)),
+        selectedBuildType: renderer.selectedBuildType,
+        selectedTowerId: renderer.selectedTowerId,
+        hoverOpponentTowerId: renderer.hoverOpponentTowerId,
+        tooltipVisible: ui.tooltipVisible,
+        helpOpen: ui.helpOpen
       };
     }
   };

@@ -86,6 +86,10 @@ export class CandyAudio {
         this._tone({ type: 'triangle', freq: 659, duration: 0.08, gain: 0.25, delay: 0.07 });
         this._tone({ type: 'triangle', freq: 784, duration: 0.14, gain: 0.28, delay: 0.14 });
         break;
+      case 'demolish':
+        this._tone({ type: 'sawtooth', freq: 240, freqEnd: 110, duration: 0.11, gain: 0.22, delay: 0 });
+        this._tone({ type: 'triangle', freq: 740, freqEnd: 1120, duration: 0.12, gain: 0.2, delay: 0.07 });
+        break;
       case 'coin':
         this._tone({ type: 'sine', freq: 880, duration: 0.07, gain: 0.22, delay: 0 });
         this._tone({ type: 'sine', freq: 1175, duration: 0.12, gain: 0.22, delay: 0.06 });
@@ -96,20 +100,33 @@ export class CandyAudio {
       case 'frost':
         this._tone({ type: 'triangle', freq: 920, freqEnd: 1320, duration: 0.1, gain: 0.14 });
         break;
+      case 'frost_nova':
+        this._tone({ type: 'sine', freq: 1200, freqEnd: 620, duration: 0.22, gain: 0.2, delay: 0 });
+        this._tone({ type: 'triangle', freq: 1480, freqEnd: 980, duration: 0.18, gain: 0.16, delay: 0.04 });
+        break;
       case 'boom':
         this._tone({ type: 'sawtooth', freq: 190, freqEnd: 75, duration: 0.15, gain: 0.18 });
         break;
       case 'laser':
         this._tone({ type: 'sawtooth', freq: 1240, freqEnd: 410, duration: 0.12, gain: 0.16 });
         break;
+      case 'execute':
+        this._tone({ type: 'sawtooth', freq: 1480, freqEnd: 280, duration: 0.16, gain: 0.24, delay: 0 });
+        this._tone({ type: 'triangle', freq: 980, freqEnd: 1560, duration: 0.12, gain: 0.2, delay: 0.05 });
+        break;
+      case 'shield_hit':
+        this._tone({ type: 'sine', freq: 1080, freqEnd: 820, duration: 0.06, gain: 0.14 });
+        break;
+      case 'shield_break':
+        this._tone({ type: 'triangle', freq: 980, freqEnd: 340, duration: 0.16, gain: 0.22, delay: 0 });
+        this._tone({ type: 'sine', freq: 1420, freqEnd: 620, duration: 0.12, gain: 0.16, delay: 0.04 });
+        break;
+      case 'heal_pulse':
+        this._tone({ type: 'sine', freq: 520, freqEnd: 780, duration: 0.15, gain: 0.14 });
+        break;
       case 'express_honk':
         this._tone({ type: 'square', freq: 440, duration: 0.09, gain: 0.16, delay: 0 });
         this._tone({ type: 'square', freq: 554, duration: 0.14, gain: 0.16, delay: 0.11 });
-        break;
-      case 'feint_laugh':
-        this._tone({ type: 'triangle', freq: 680, freqEnd: 920, duration: 0.09, gain: 0.22, delay: 0 });
-        this._tone({ type: 'triangle', freq: 880, freqEnd: 620, duration: 0.12, gain: 0.22, delay: 0.1 });
-        this._tone({ type: 'triangle', freq: 980, freqEnd: 1240, duration: 0.14, gain: 0.22, delay: 0.22 });
         break;
       case 'hurt':
         this._tone({ type: 'sawtooth', freq: 310, freqEnd: 180, duration: 0.14, gain: 0.2 });

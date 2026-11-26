@@ -1,0 +1,47 @@
+{
+  "noTestQueryHasHook": false,
+  "normalMapTitle": "彩虹双拱门",
+  "normalStartGold": "$190",
+  "goldAfterOpeningBuild": "$10",
+  "tooltipVisible": true,
+  "obstacle1BPreview": "解锁：⚡ 极速糖格（攻速 ×1.20（+20% 射击频率））",
+  "helpContainsFeint": false,
+  "opponentHoverCardText": "\n      \n        草莓豆豆炮 Lv.1\n        只读\n      \n      射程 150 · 攻速 2.60/s · 伤 11\n      索敌：最前\n    ",
+  "viewSwitchChecks": {
+    "enteredOpponent": true,
+    "stillLockedAfterClick": true,
+    "goldUnchangedOnOppClick": false,
+    "returnedViaLeftHotzone": true,
+    "spaceEntered": true,
+    "escReturned": true,
+    "num1Returned": true
+  },
+  "viewStateInOpponent": {
+    "viewMode": "opponent",
+    "peekProgress": 1,
+    "selectedBuildType": null,
+    "selectedTowerId": null,
+    "hoverOpponentTowerId": null,
+    "tooltipVisible": false,
+    "helpOpen": false
+  },
+  "viewStateBackSelf": {
+    "viewMode": "self",
+    "peekProgress": 0,
+    "selectedBuildType": null,
+    "selectedTowerId": null,
+    "hoverOpponentTowerId": null,
+    "tooltipVisible": false,
+    "helpOpen": false
+  },
+  "stressSpawned": {
+    "placedTowers": 15,
+    "spawnedCreeps": 45,
+    "lavaZones": 2
+  },
+  "netDebugDpr2": "FPS: 78Render: 0.90 msRTT: 37 msServerTick: 0.22 msDPR: 2Entities(怪/弹/粒): 33/8/155",
+  "express2ABannerText": "💚 暗黑奶妈车 即将抵达！(2.6s)",
+  "consoleErrors": [],
+  "pageErrors": [],
+  "externalRequests": []
+}

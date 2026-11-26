@@ -1,0 +1,23 @@
+{
+  "consoleErrors": [],
+  "pageErrors": [],
+  "healerBannerText": "💚 暗黑奶妈车 即将抵达！(2.7s)",
+  "queueBannerText": "💚 暗黑奶妈车 即将抵达！(2.4s · 共 2 辆排队)",
+  "peekBox": {
+    "x": 434.578125,
+    "y": 64,
+    "width": 410.84375,
+    "height": 30
+  },
+  "expressBox": {
+    "x": 523.2147827148438,
+    "y": 101.44322967529297,
+    "width": 233.57049560546875,
+    "height": 37.11353302001953
+  },
+  "overlapPeekExpress1": 0,
+  "overlapPeekExpress2": 0,
+  "overlapToastPeek": 0,
+  "oppCardVisible": true,
+  "oppCardText": "\n      \n        柠檬破甲狙 Lv.1\n        只读\n      \n      射程 300 · 攻速 0.55/s · 伤 78\n      索敌：血厚 · 🔥 烈焰糖格\n    "
+}

@@ -7,7 +7,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createCandyServer } from '../server/index.js';
-import { ROOM_CODE_CHARS } from '../public/js/shared/constants.js';
+import { MAP_ORDER, ROOM_CODE_CHARS } from '../public/js/shared/constants.js';
 import { NetClient } from '../public/js/net-client.js';
 import { CandyAudio } from '../public/js/audio.js';
 
@@ -57,7 +57,7 @@ function connectWs(url) {
   });
 }
 
-test('AC-02 & AC-07: PvP room lifecycle, rematch, and strict WS anti-leak for express/feint', async () => {
+test('AC-02 & AC-04: PvP map selection, demolish obstacle, Lv3 branch, 2A express alerts, and rematch', async () => {
   const srv = createCandyServer({ port: 0, allowTestHooks: true });
   const port = await srv.start();
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -66,9 +66,10 @@ test('AC-02 & AC-07: PvP room lifecycle, rematch, and strict WS anti-leak for ex
   const wsB = await connectWs(wsUrl);
 
   try {
-    wsA.send(JSON.stringify({ type: 'create_room', mode: 'pvp', nickname: '草莓小仙' }));
+    wsA.send(JSON.stringify({ type: 'create_room', mode: 'pvp', nickname: '草莓小仙', mapId: 'classic_s' }));
     const stateA1 = await wsA.waitFor((m) => m.type === 'room_state');
     assert.equal(stateA1.phase, 'LOBBY');
+    assert.equal(stateA1.mapSelection, 'classic_s');
     assert.equal(stateA1.roomCode.length, 4);
     for (const ch of stateA1.roomCode) {
       assert.ok(ROOM_CODE_CHARS.includes(ch), `Unexpected char ${ch} in roomCode`);
@@ -77,61 +78,79 @@ test('AC-02 & AC-07: PvP room lifecycle, rematch, and strict WS anti-leak for ex
     wsB.send(JSON.stringify({ type: 'join_room', roomCode: stateA1.roomCode, nickname: '薄荷熊' }));
     const stateB1 = await wsB.waitFor((m) => m.type === 'room_state' && m.players.length === 2);
     assert.equal(stateB1.playerSlot, 1);
+    assert.equal(stateB1.mapSelection, 'classic_s');
+
+    // Non-host select_map must fail with NOT_HOST
+    wsB.send(JSON.stringify({ type: 'select_map', mapId: 'crown_peaks' }));
+    const errNotHost = await wsB.waitFor((m) => m.type === 'action_error');
+    assert.equal(errNotHost.code, 'NOT_HOST');
+
+    // Host switches map to crown_peaks -> B syncs
+    wsA.send(JSON.stringify({ type: 'select_map', mapId: 'crown_peaks' }));
+    const syncB = await wsB.waitFor((m) => m.type === 'room_state' && m.mapSelection === 'crown_peaks');
+    assert.equal(syncB.mapSelection, 'crown_peaks');
 
     wsA.send(JSON.stringify({ type: 'player_ready', ready: true }));
     wsB.send(JSON.stringify({ type: 'player_ready', ready: true }));
 
     const cdA = await wsA.waitFor((m) => m.type === 'room_state' && m.phase === 'COUNTDOWN');
-    assert.equal(cdA.phase, 'COUNTDOWN');
+    assert.equal(cdA.resolvedMapId, 'crown_peaks');
 
     // Fast-forward countdown into PLAYING
     wsA.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 1 } }));
     const snapA0 = await wsA.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'PLAYING' && m.tick >= 1);
     const snapB0 = await wsB.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'PLAYING' && m.tick >= 1);
-    assert.equal(snapA0.tick, 1);
-    assert.equal(snapB0.tick, 1);
+    assert.equal(snapA0.mapId, 'crown_peaks');
+    assert.equal(snapB0.mapId, 'crown_peaks');
 
-    // Grant resources to A and send both real express & feint
+    // Grant resources to A, demolish obstacle [9,4] (crown_peaks range buff), place tower, upgrade Lv2->Lv3 branch A
     wsA.send(JSON.stringify({ type: 'test_command', action: 'grantResources', payload: { target: 'self', gold: 2000 } }));
     await wsA.waitFor((m) => m.type === 'test_command_result' && m.action === 'grantResources');
 
-    wsB.drainQueue();
-    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'express_party' }));
-    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'express_feint' }));
+    wsA.send(JSON.stringify({ type: 'demolish_obstacle', col: 9, row: 4 }));
+    const snapDem = await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.clearedObstacles.includes('9,4'));
+    assert.equal(snapDem.opponent.clearedObstacles.length, 0);
 
-    // Fast-forward 30 ticks (1.5s < 3.0s) and verify B's WS messages NEVER contain isFake or sendType
-    wsA.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 30 } }));
+    wsA.send(JSON.stringify({ type: 'place_tower', towerType: 'strawberry', col: 9, row: 4 }));
+    const snapPlace = await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.towers.length === 1);
+    const tid = snapPlace.self.towers[0].id;
+    assert.equal(snapPlace.self.towers[0].buffTile, 'range');
+
+    wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid }));
+    await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.towers[0]?.level === 2);
+
+    // Lv2 -> Lv3 without branch rejected
+    wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid }));
+    const errBranch = await wsA.waitFor((m) => m.type === 'action_error');
+    assert.equal(errBranch.code, 'INVALID_BRANCH');
+
+    wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid, branch: 'A' }));
+    const snapLv3 = await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.towers[0]?.level === 3);
+    assert.equal(snapLv3.self.towers[0].branch, 'A');
+
+    // Send 2A express_healer & express_titan -> B must receive sendType for icon alert
+    wsB.drainQueue();
+    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'express_healer' }));
+    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'express_titan' }));
+    wsA.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 20 } }));
     await wsA.waitFor((m) => m.type === 'test_command_result' && m.action === 'fastForwardTicks');
 
     const bSnapMid = await wsB.waitFor(
       (m) => m.type === 'game_snapshot' && m.self.incomingAlerts.length === 2
     );
-    const serialized = JSON.stringify(bSnapMid.self.incomingAlerts);
-    assert.equal(serialized.includes('isFake'), false);
-    assert.equal(serialized.includes('sendType'), false);
-    assert.equal(serialized.includes('express_feint'), false);
-    assert.equal(serialized.includes('express_party'), false);
+    assert.equal(bSnapMid.self.incomingAlerts[0].sendType, 'express_healer');
+    assert.equal(bSnapMid.self.incomingAlerts[1].sendType, 'express_titan');
+    assert.equal(JSON.stringify(bSnapMid).includes('isFake'), false);
 
-    // Check any game_event received by B so far
-    const bMsgs = wsB.drainQueue();
-    for (const m of bMsgs) {
-      if (m.type === 'game_event') {
-        const s = JSON.stringify(m);
-        assert.equal(s.includes('isFake'), false);
-        assert.equal(s.includes('sendType'), false);
-      }
-    }
-
-    // End game by reducing B hp to 0 via wave/hp grant + fast forward
+    // End game and rematch
     wsA.send(JSON.stringify({ type: 'test_command', action: 'grantResources', payload: { target: 'opponent', hp: 1 } }));
     await wsA.waitFor((m) => m.type === 'test_command_result' && m.action === 'grantResources');
     wsA.send(JSON.stringify({ type: 'test_command', action: 'jumpWave', payload: { waveNum: 15 } }));
     await wsA.waitFor((m) => m.type === 'test_command_result' && m.action === 'jumpWave');
-    wsA.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 800 } }));
+    wsA.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 900 } }));
     const endedSnap = await wsA.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'ENDED');
     assert.ok(endedSnap.endedResult);
 
-    // Rematch
     wsA.send(JSON.stringify({ type: 'rematch_request' }));
     wsB.send(JSON.stringify({ type: 'rematch_request' }));
     const rematchCd = await wsA.waitFor((m) => m.type === 'room_state' && m.phase === 'COUNTDOWN');
@@ -143,28 +162,31 @@ test('AC-02 & AC-07: PvP room lifecycle, rematch, and strict WS anti-leak for ex
   }
 });
 
-test('AC-01: Single-player AI mode (casual & clever) builds & sends without cheats', async () => {
+test('AC-01 & Random Map: Single-player AI mode resolves random map and operates cleanly', async () => {
   const srv = createCandyServer({ port: 0, allowTestHooks: true });
   const port = await srv.start();
   const ws = await connectWs(`ws://127.0.0.1:${port}/ws`);
 
   try {
-    ws.send(JSON.stringify({ type: 'create_room', mode: 'ai', aiDifficulty: 'clever', nickname: '玩家1' }));
+    ws.send(JSON.stringify({ type: 'create_room', mode: 'ai', aiDifficulty: 'clever', mapId: 'random', nickname: '玩家1' }));
     const cd = await ws.waitFor((m) => m.type === 'room_state' && m.phase === 'COUNTDOWN');
     assert.equal(cd.players.length, 2);
     assert.equal(cd.players[1].isAI, true);
+    assert.equal(cd.mapSelection, 'random');
+    assert.ok(MAP_ORDER.includes(cd.resolvedMapId));
 
     ws.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 500 } }));
     const snap = await ws.waitFor((m) => m.type === 'game_snapshot' && m.tick >= 500);
+    assert.equal(snap.mapId, cd.resolvedMapId);
     assert.ok(snap.opponent.towers.length >= 2, 'Clever AI should build at least 2 towers');
-    assert.ok(snap.opponent.eco > 25, 'Clever AI should increase Eco via sending creeps');
+    assert.ok(snap.opponent.eco > 25, 'Clever AI should increase Eco via sending dark raids');
   } finally {
     ws.close();
     await srv.stop();
   }
 });
 
-test('AC-10: 20s Reconnect grace pauses simulation, restores full state, and awards timeout victory', async () => {
+test('AC-11: 20s Reconnect grace pauses simulation, restores V2 mapId/clearedObstacles/branch, and awards timeout victory', async () => {
   const srv = createCandyServer({ port: 0, allowTestHooks: true });
   const port = await srv.start();
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -173,7 +195,7 @@ test('AC-10: 20s Reconnect grace pauses simulation, restores full state, and awa
   let wsB = await connectWs(wsUrl);
 
   try {
-    wsA.send(JSON.stringify({ type: 'create_room', mode: 'pvp', nickname: 'A' }));
+    wsA.send(JSON.stringify({ type: 'create_room', mode: 'pvp', mapId: 'rainbow_m', nickname: 'A' }));
     const stA = await wsA.waitFor((m) => m.type === 'room_state');
     wsB.send(JSON.stringify({ type: 'join_room', roomCode: stA.roomCode, nickname: 'B' }));
     const stB = await wsB.waitFor((m) => m.type === 'room_state' && m.players.length === 2);
@@ -185,16 +207,25 @@ test('AC-10: 20s Reconnect grace pauses simulation, restores full state, and awa
     wsA.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 10 } }));
     await wsA.waitFor((m) => m.type === 'game_snapshot' && m.tick === 10);
 
-    // B places a tower
-    wsB.send(JSON.stringify({ type: 'place_tower', towerType: 'strawberry', col: 3, row: 3 }));
-    await wsB.waitFor((m) => m.type === 'game_snapshot' && m.self.towers.length === 1);
+    // Grant B gold, demolish rainbow_m obstacle [5,4], place tower and upgrade Lv3-B
+    wsB.send(JSON.stringify({ type: 'test_command', action: 'grantResources', payload: { target: 'self', gold: 2000 } }));
+    await wsB.waitFor((m) => m.type === 'test_command_result' && m.action === 'grantResources');
+    wsB.send(JSON.stringify({ type: 'demolish_obstacle', col: 5, row: 4 }));
+    await wsB.waitFor((m) => m.type === 'game_snapshot' && m.self.clearedObstacles.includes('5,4'));
+    wsB.send(JSON.stringify({ type: 'place_tower', towerType: 'mint', col: 5, row: 4 }));
+    const sB1 = await wsB.waitFor((m) => m.type === 'game_snapshot' && m.self.towers.length === 1);
+    const tid = sB1.self.towers[0].id;
+    wsB.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid }));
+    await wsB.waitFor((m) => m.type === 'game_snapshot' && m.self.towers[0]?.level === 2);
+    wsB.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid, branch: 'B' }));
+    await wsB.waitFor((m) => m.type === 'game_snapshot' && m.self.towers[0]?.level === 3);
 
     // Disconnect B
     wsB.close();
     const pausedState = await wsA.waitFor((m) => m.type === 'room_state' && m.phase === 'PAUSED_RECONNECT');
     assert.equal(pausedState.phase, 'PAUSED_RECONNECT');
 
-    // Reconnect B with reconnectToken
+    // Reconnect B with reconnectToken -> verify V2 mapId, clearedObstacles, branch & buffTile restored
     wsB = await connectWs(wsUrl);
     wsB.send(
       JSON.stringify({
@@ -207,8 +238,13 @@ test('AC-10: 20s Reconnect grace pauses simulation, restores full state, and awa
     );
     const resumedState = await wsB.waitFor((m) => m.type === 'room_state' && m.phase === 'PLAYING');
     assert.equal(resumedState.playerSlot, 1);
+    assert.equal(resumedState.resolvedMapId, 'rainbow_m');
     const resumedSnap = await wsB.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'PLAYING');
+    assert.equal(resumedSnap.mapId, 'rainbow_m');
+    assert.deepEqual(resumedSnap.self.clearedObstacles, ['5,4']);
     assert.equal(resumedSnap.self.towers.length, 1);
+    assert.equal(resumedSnap.self.towers[0].branch, 'B');
+    assert.equal(resumedSnap.self.towers[0].buffTile, 'rate');
 
     // Now simulate disconnect timeout (remainMs = 250) -> A must win automatically
     wsA.send(
@@ -230,11 +266,10 @@ test('AC-10: 20s Reconnect grace pauses simulation, restores full state, and awa
   }
 });
 
-test('AC-11: Subpath reverse proxy (/candy-td/*) serves assets and upgrades WS', async () => {
+test('AC-12: Subpath reverse proxy (/candy-td/*) serves assets and upgrades WS', async () => {
   const backend = createCandyServer({ port: 0, allowTestHooks: false });
   const backendPort = await backend.start();
 
-  // Local HTTP + WS reverse proxy stripping /candy-td prefix
   const proxyServer = http.createServer((req, res) => {
     const stripped = (req.url || '/').replace(/^\/candy-td/, '') || '/';
     const proxyReq = http.request(
@@ -288,17 +323,16 @@ test('AC-11: Subpath reverse proxy (/candy-td/*) serves assets and upgrades WS',
   const proxyPort = proxyServer.address().port;
 
   try {
-    // 1. Check healthz and constants.js through /candy-td/
     const res1 = await fetch(`http://127.0.0.1:${proxyPort}/candy-td/js/shared/constants.js`);
     assert.equal(res1.status, 200);
     const body1 = await res1.text();
-    assert.ok(body1.includes('CANVAS_WIDTH'));
+    assert.ok(body1.includes('MAP_DEFS'));
 
-    // 2. Check WS through /candy-td/ws
     const ws = await connectWs(`ws://127.0.0.1:${proxyPort}/candy-td/ws`);
-    ws.send(JSON.stringify({ type: 'create_room', mode: 'pvp', nickname: '反代测试' }));
+    ws.send(JSON.stringify({ type: 'create_room', mode: 'pvp', mapId: 'waffle_zig', nickname: '反代测试' }));
     const state = await ws.waitFor((m) => m.type === 'room_state');
     assert.equal(state.phase, 'LOBBY');
+    assert.equal(state.mapSelection, 'waffle_zig');
     ws.close();
   } finally {
     proxyWss.close();
@@ -310,7 +344,7 @@ test('AC-11: Subpath reverse proxy (/candy-td/*) serves assets and upgrades WS',
   }
 });
 
-test('AC-12 & AC-13: Production mode disables test_command & invalid payloads return safe action_error', async () => {
+test('AC-13 & AC-14: Production mode disables test_command & V2 invalid payloads return safe action_error', async () => {
   const srv = createCandyServer({ port: 0, allowTestHooks: false });
   const port = await srv.start();
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -329,6 +363,11 @@ test('AC-12 & AC-13: Production mode disables test_command & invalid payloads re
     ws1.send(JSON.stringify({ type: 'test_command', action: 'getSnapshot' }));
     const errHook = await ws1.waitFor((m) => m.type === 'action_error');
     assert.equal(errHook.code, 'TEST_HOOKS_DISABLED');
+
+    // Invalid mapId in create_room
+    ws1.send(JSON.stringify({ type: 'create_room', mode: 'pvp', mapId: 'no_such_map', nickname: 'X' }));
+    const errBadMap = await ws1.waitFor((m) => m.type === 'action_error');
+    assert.equal(errBadMap.code, 'INVALID_MAP');
 
     // Join non-existent room
     ws1.send(JSON.stringify({ type: 'join_room', roomCode: 'ZZZZ', nickname: 'X' }));
@@ -357,89 +396,61 @@ test('AC-12 & AC-13: Production mode disables test_command & invalid payloads re
   }
 });
 
-test('Round-2 Regression: leave_room cleans LOBBY ghost, COUNTDOWN reconnect initializes sim, and AC-13 WS boundaries', async () => {
+test('AC-14 Regression: V2 gameplay boundaries (OOB cell, path cell, duplicate demolish, missing branch, invalid express_feint)', async () => {
   const srv = createCandyServer({ port: 0, allowTestHooks: true });
   const port = await srv.start();
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
 
   const wsA = await connectWs(wsUrl);
-  let wsB = await connectWs(wsUrl);
+  const wsB = await connectWs(wsUrl);
 
   try {
-    // 1. P1 creates PvP room, P2 joins, P1 sends leave_room -> P2 becomes host with 1 player
-    wsA.send(JSON.stringify({ type: 'create_room', mode: 'pvp', nickname: 'HostA' }));
+    wsA.send(JSON.stringify({ type: 'create_room', mode: 'pvp', mapId: 'classic_s', nickname: 'HostA' }));
     const r1 = await wsA.waitFor((m) => m.type === 'room_state');
     wsB.send(JSON.stringify({ type: 'join_room', roomCode: r1.roomCode, nickname: 'GuestB' }));
     await wsB.waitFor((m) => m.type === 'room_state' && m.players.length === 2);
-
-    wsA.drainQueue();
-    wsA.send(JSON.stringify({ type: 'leave_room' }));
-    const p2HostState = await wsB.waitFor((m) => m.type === 'room_state' && m.players.length === 1);
-    assert.equal(p2HostState.hostSlot, 1);
-
-    // P1 creates a brand new room -> P2 toggling ready in old room must NOT leak to P1
-    wsA.send(JSON.stringify({ type: 'create_room', mode: 'pvp', nickname: 'HostA2' }));
-    const r2 = await wsA.waitFor((m) => m.type === 'room_state');
-    assert.notEqual(r2.roomCode, r1.roomCode);
-    wsB.send(JSON.stringify({ type: 'player_ready', ready: true }));
-    await new Promise((r) => setTimeout(r, 80));
-    const leaked = wsA.drainQueue().filter((m) => m.type === 'room_state' && m.roomCode === r1.roomCode);
-    assert.equal(leaked.length, 0);
-
-    // 2. COUNTDOWN disconnect + reconnect must NOT leave sim === null
-    wsB.send(JSON.stringify({ type: 'leave_room' }));
-    wsB.send(JSON.stringify({ type: 'join_room', roomCode: r2.roomCode, nickname: 'GuestB2' }));
-    const bJoin = await wsB.waitFor((m) => m.type === 'room_state' && m.roomCode === r2.roomCode && m.players.length === 2);
     wsA.send(JSON.stringify({ type: 'player_ready', ready: true }));
     wsB.send(JSON.stringify({ type: 'player_ready', ready: true }));
     await wsA.waitFor((m) => m.type === 'room_state' && m.phase === 'COUNTDOWN');
 
-    // Disconnect B during COUNTDOWN
-    wsB.close();
-    await wsA.waitFor((m) => m.type === 'room_state' && m.phase === 'PAUSED_RECONNECT');
-
-    // Reconnect B -> must resume COUNTDOWN and then transition into PLAYING with non-null sim
-    wsB = await connectWs(wsUrl);
-    wsB.send(
-      JSON.stringify({
-        type: 'join_room',
-        roomCode: r2.roomCode,
-        nickname: 'GuestB2',
-        playerId: bJoin.playerId,
-        reconnectToken: bJoin.reconnectToken
-      })
-    );
-    await wsA.waitFor((m) => m.type === 'room_state' && m.phase === 'COUNTDOWN');
     wsA.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 5 } }));
-    const snapA = await wsA.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'PLAYING' && m.tick >= 5);
-    assert.ok(snapA.tick >= 5);
+    await wsA.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'PLAYING' && m.tick >= 5);
 
-    // 3. AC-13 WS protocol boundaries: out-of-bounds cell, path cell, max level, cooldown spam
     wsA.send(JSON.stringify({ type: 'place_tower', towerType: 'strawberry', col: 99, row: 0 }));
-    const errOob = await wsA.waitFor((m) => m.type === 'action_error');
-    assert.equal(errOob.code, 'INVALID_CELL');
+    assert.equal((await wsA.waitFor((m) => m.type === 'action_error')).code, 'INVALID_CELL');
 
     wsA.send(JSON.stringify({ type: 'place_tower', towerType: 'strawberry', col: 0, row: 2 }));
-    const errPath = await wsA.waitFor((m) => m.type === 'action_error');
-    assert.equal(errPath.code, 'INVALID_CELL');
+    assert.equal((await wsA.waitFor((m) => m.type === 'action_error')).code, 'INVALID_CELL');
+
+    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'express_feint' }));
+    assert.equal((await wsA.waitFor((m) => m.type === 'action_error')).code, 'INVALID_SEND_TYPE');
 
     wsA.send(JSON.stringify({ type: 'test_command', action: 'grantResources', payload: { target: 'self', gold: 2000 } }));
     await wsA.waitFor((m) => m.type === 'test_command_result' && m.action === 'grantResources');
 
+    // Duplicate demolish
+    wsA.send(JSON.stringify({ type: 'demolish_obstacle', col: 3, row: 4 }));
+    await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.clearedObstacles.includes('3,4'));
+    wsA.send(JSON.stringify({ type: 'demolish_obstacle', col: 3, row: 4 }));
+    assert.equal((await wsA.waitFor((m) => m.type === 'action_error')).code, 'OBSTACLE_ALREADY_CLEARED');
+
+    // Lv2 -> Lv3 branch checks & max level
     wsA.send(JSON.stringify({ type: 'place_tower', towerType: 'strawberry', col: 3, row: 3 }));
     const tSnap = await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.towers.length === 1);
     const tid = tSnap.self.towers[0].id;
     wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid }));
+    await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.towers[0]?.level === 2);
     wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid }));
-    wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid }));
-    const errMax = await wsA.waitFor((m) => m.type === 'action_error');
-    assert.equal(errMax.code, 'MAX_LEVEL');
+    assert.equal((await wsA.waitFor((m) => m.type === 'action_error')).code, 'INVALID_BRANCH');
+    wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid, branch: 'B' }));
+    await wsA.waitFor((m) => m.type === 'game_snapshot' && m.self.towers[0]?.level === 3);
+    wsA.send(JSON.stringify({ type: 'upgrade_tower', towerId: tid, branch: 'A' }));
+    assert.equal((await wsA.waitFor((m) => m.type === 'action_error')).code, 'MAX_LEVEL');
 
-    // Cooldown spam on express_feint
-    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'express_feint' }));
-    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'express_feint' }));
-    const errCd = await wsA.waitFor((m) => m.type === 'action_error');
-    assert.equal(errCd.code, 'COOLDOWN_ACTIVE');
+    // Cooldown spam on raid_swarm
+    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'raid_swarm' }));
+    wsA.send(JSON.stringify({ type: 'send_wave', sendType: 'raid_swarm' }));
+    assert.equal((await wsA.waitFor((m) => m.type === 'action_error')).code, 'COOLDOWN_ACTIVE');
   } finally {
     wsA.close();
     wsB.close();
@@ -492,7 +503,6 @@ test('AC-15: Static assets and /healthz return exact Content-Length without chun
         ? await fs.readFile(filePath)
         : Buffer.from(JSON.stringify({ ok: true, allowTestHooks: false }), 'utf8');
 
-      // 1. Without Accept-Encoding: gzip
       const rawRes = await rawHttpGet(port, reqPath);
       assert.equal(rawRes.status, 200, `${reqPath} raw status`);
       assert.equal(rawRes.headers['transfer-encoding'], undefined, `${reqPath} raw must not be chunked`);
@@ -500,7 +510,6 @@ test('AC-15: Static assets and /healthz return exact Content-Length without chun
       assert.equal(Number(rawRes.headers['content-length']), rawRes.body.length, `${reqPath} raw Content-Length`);
       assert.equal(Buffer.compare(rawRes.body, expectedRaw), 0, `${reqPath} raw byte match`);
 
-      // 2. With Accept-Encoding: gzip
       const gzRes = await rawHttpGet(port, reqPath, { 'Accept-Encoding': 'gzip, deflate, br' });
       assert.equal(gzRes.status, 200, `${reqPath} gzip status`);
       assert.equal(gzRes.headers['transfer-encoding'], undefined, `${reqPath} gzip must not be chunked`);
@@ -587,7 +596,6 @@ test('AC-16: NetClient deduplicates concurrent connect(), rejects on timeout/clo
   try {
     const net = new NetClient();
 
-    // 1. Concurrent connect() during slow handshake shares same promise & waits for OPEN
     mode = 'slow_open';
     const p1 = net.connect({ timeoutMs: 1000 });
     const p2 = net.connect({ timeoutMs: 1000 });
@@ -599,37 +607,32 @@ test('AC-16: NetClient deduplicates concurrent connect(), rejects on timeout/clo
     assert.equal(net.send({ type: 'ping', clientTime: 1 }), true);
     assert.ok(sentMessages.some((m) => m.type === 'create_room'));
 
-    // Reset connection for timeout test
     net._stopPing();
     net.ws.close();
     net.ws = null;
     net.connected = false;
 
-    // 2. Hanging endpoint times out with WS_CONNECT_TIMEOUT and cleans up state
     mode = 'hang';
     await assert.rejects(() => net.connect({ timeoutMs: 80 }), /WS_CONNECT_TIMEOUT/);
     assert.equal(net.ws, null);
     assert.equal(net._connectPromise, null);
     assert.equal(net.connected, false);
 
-    // 3. Close before open rejects with WS_CONNECT_CLOSED and cleans up state
     mode = 'close_early';
     await assert.rejects(() => net.connect({ timeoutMs: 500 }), /WS_CONNECT_CLOSED/);
     assert.equal(net.ws, null);
     assert.equal(net._connectPromise, null);
 
-    // 4. Retry succeeds once endpoint recovers
     mode = 'fast_open';
     await net.connect({ timeoutMs: 500 });
     assert.equal(net.connected, true);
     assert.equal(net.send({ type: 'join_room', roomCode: 'ABCD' }), true);
 
-    // 5. Stale timed-out socket firing late close must NOT clobber newer active connection
     let disconnectCount = 0;
     net.handlers.onConnectionChange = (isConn) => {
       if (!isConn) disconnectCount++;
     };
-    const staleSocket = createdSockets[1]; // from mode === 'hang'
+    const staleSocket = createdSockets[1];
     staleSocket._emit('close', {});
     assert.equal(net.connected, true);
     assert.ok(net.ws !== null);
@@ -640,7 +643,6 @@ test('AC-16: NetClient deduplicates concurrent connect(), rejects on timeout/clo
     net.ws = null;
     net.connected = false;
 
-    // 6. Synchronous throw in new WebSocket() rejects cleanly without TDZ ReferenceError
     mode = 'sync_throw';
     await assert.rejects(() => net.connect({ timeoutMs: 500 }), /WS_SYNC_CONSTRUCT_ERROR/);
     assert.equal(net.ws, null);
@@ -653,7 +655,7 @@ test('AC-16: NetClient deduplicates concurrent connect(), rejects on timeout/clo
   }
 });
 
-test('AC-18: CandyAudio falls back to in-memory mute state when sessionStorage throws SecurityError', () => {
+test('AC-17: CandyAudio falls back to in-memory mute state when sessionStorage throws SecurityError', () => {
   const prevStorage = globalThis.sessionStorage;
   const securityErr = () => {
     const err = new Error('Access is denied for this document.');

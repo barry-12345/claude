@@ -1,9 +1,14 @@
 import crypto from 'node:crypto';
 import {
   COUNTDOWN_SECONDS,
+  INITIAL_ECO,
+  INITIAL_GOLD,
+  INITIAL_HP,
+  MAP_ORDER,
   RECONNECT_GRACE_MS,
   ROOM_CODE_CHARS,
-  TICK_MS
+  TICK_MS,
+  isValidMapSelection
 } from '../public/js/shared/constants.js';
 import { GameSimulation } from './simulation.js';
 import { CandyAIBot } from './ai-bot.js';
@@ -20,6 +25,10 @@ function sanitizeNickname(raw, fallback) {
 
 function makeToken() {
   return crypto.randomBytes(16).toString('hex');
+}
+
+function pickRandomMapId() {
+  return MAP_ORDER[crypto.randomInt(0, MAP_ORDER.length)];
 }
 
 export class RoomManager {
@@ -62,6 +71,13 @@ export class RoomManager {
     this._send(ws, { type: 'action_error', code, message });
   }
 
+  _resolveMapForMatch(room) {
+    if (room.mapSelection === 'random') {
+      return pickRandomMapId();
+    }
+    return isValidMapSelection(room.mapSelection) ? room.mapSelection : MAP_ORDER[0];
+  }
+
   _broadcastRoomState(room) {
     const now = Date.now();
     const countdownSec =
@@ -91,6 +107,8 @@ export class RoomManager {
         roomCode: room.code,
         mode: room.mode,
         aiDifficulty: room.aiDifficulty,
+        mapSelection: room.mapSelection,
+        resolvedMapId: room.resolvedMapId,
         phase: room.phase,
         hostSlot: room.hostSlot,
         playerSlot: p.slot,
@@ -126,6 +144,7 @@ export class RoomManager {
 
   _startCountdown(room) {
     room.phase = 'COUNTDOWN';
+    room.resolvedMapId = this._resolveMapForMatch(room);
     room.countdownEndMs = Date.now() + COUNTDOWN_SECONDS * 1000;
     room.lastCountdownBroadcastSec = COUNTDOWN_SECONDS;
     this._broadcastRoomState(room);
@@ -133,8 +152,11 @@ export class RoomManager {
 
   _beginPlaying(room) {
     room.phase = 'PLAYING';
-    room.sim = new GameSimulation();
-    room.aiBot = room.mode === 'ai' ? new CandyAIBot(room.aiDifficulty) : null;
+    if (!room.resolvedMapId) {
+      room.resolvedMapId = this._resolveMapForMatch(room);
+    }
+    room.sim = new GameSimulation({ mapId: room.resolvedMapId });
+    room.aiBot = room.mode === 'ai' ? new CandyAIBot(room.aiDifficulty, room.resolvedMapId) : null;
     for (const p of room.players) {
       if (p) p.rematchReady = false;
     }
@@ -179,6 +201,7 @@ export class RoomManager {
               reason: 'reconnect_timeout',
               endTick: room.sim.tick,
               wave: room.sim.wave,
+              mapId: room.sim.mapId,
               stats: [
                 { slot: 0, hp: p0.hp, eco: p0.eco, gold: p0.gold, ...p0.stats },
                 { slot: 1, hp: p1.hp, eco: p1.eco, gold: p1.gold, ...p1.stats }
@@ -192,9 +215,38 @@ export class RoomManager {
               reason: 'reconnect_timeout',
               endTick: 0,
               wave: 0,
+              mapId: room.resolvedMapId,
               stats: [
-                { slot: 0, hp: 20, eco: 25, gold: 320, towersBuilt: 0, creepsKilled: 0, creepsSent: 0, feintsSent: 0 },
-                { slot: 1, hp: 20, eco: 25, gold: 320, towersBuilt: 0, creepsKilled: 0, creepsSent: 0, feintsSent: 0 }
+                {
+                  slot: 0,
+                  hp: INITIAL_HP,
+                  eco: INITIAL_ECO,
+                  gold: INITIAL_GOLD,
+                  towersBuilt: 0,
+                  towersUpgraded: 0,
+                  towersSold: 0,
+                  obstaclesCleared: 0,
+                  creepsKilled: 0,
+                  creepsSent: 0,
+                  expressSent: 0,
+                  goldEarned: 0,
+                  damageDealt: 0
+                },
+                {
+                  slot: 1,
+                  hp: INITIAL_HP,
+                  eco: INITIAL_ECO,
+                  gold: INITIAL_GOLD,
+                  towersBuilt: 0,
+                  towersUpgraded: 0,
+                  towersSold: 0,
+                  obstaclesCleared: 0,
+                  creepsKilled: 0,
+                  creepsSent: 0,
+                  expressSent: 0,
+                  goldEarned: 0,
+                  damageDealt: 0
+                }
               ]
             };
           }
@@ -264,12 +316,16 @@ export class RoomManager {
       case 'leave_room':
         this._leaveCurrentRoom(ws, { intentional: true });
         break;
+      case 'select_map':
+        this._handleSelectMap(ws, msg);
+        break;
       case 'player_ready':
         this._handlePlayerReady(ws, msg);
         break;
       case 'place_tower':
       case 'upgrade_tower':
       case 'sell_tower':
+      case 'demolish_obstacle':
       case 'set_targeting':
       case 'send_wave':
         this._handleGameplayAction(ws, msg);
@@ -349,6 +405,7 @@ export class RoomManager {
               reason: 'opponent_left',
               endTick: room.sim.tick,
               wave: room.sim.wave,
+              mapId: room.sim.mapId,
               stats: [
                 { slot: 0, hp: p0.hp, eco: p0.eco, gold: p0.gold, ...p0.stats },
                 { slot: 1, hp: p1.hp, eco: p1.eco, gold: p1.gold, ...p1.stats }
@@ -383,6 +440,12 @@ export class RoomManager {
   }
 
   _handleCreateRoom(ws, msg) {
+    const mapSelection = msg.mapId !== undefined ? msg.mapId : 'random';
+    if (typeof mapSelection !== 'string' || !isValidMapSelection(mapSelection)) {
+      this._sendError(ws, 'INVALID_MAP', '无效的地图选择');
+      return;
+    }
+
     this._detachCurrentSocket(ws);
 
     const mode = msg.mode === 'ai' ? 'ai' : 'pvp';
@@ -426,6 +489,8 @@ export class RoomManager {
       code,
       mode,
       aiDifficulty,
+      mapSelection,
+      resolvedMapId: null,
       phase: 'LOBBY',
       hostSlot: 0,
       players: [p0, p1],
@@ -446,6 +511,29 @@ export class RoomManager {
     } else {
       this._broadcastRoomState(room);
     }
+  }
+
+  _handleSelectMap(ws, msg) {
+    const session = this.wsToSession.get(ws);
+    if (!session) {
+      this._sendError(ws, 'NOT_IN_ROOM', '尚未加入房间');
+      return;
+    }
+    const room = this.rooms.get(session.roomCode);
+    if (!room || room.phase !== 'LOBBY') {
+      this._sendError(ws, 'INVALID_PHASE', '仅等待阶段可切换地图');
+      return;
+    }
+    if (session.slot !== room.hostSlot) {
+      this._sendError(ws, 'NOT_HOST', '仅房主可以切换对战地图');
+      return;
+    }
+    if (typeof msg.mapId !== 'string' || !isValidMapSelection(msg.mapId)) {
+      this._sendError(ws, 'INVALID_MAP', '无效的地图选择');
+      return;
+    }
+    room.mapSelection = msg.mapId;
+    this._broadcastRoomState(room);
   }
 
   _handleJoinRoom(ws, msg) {
@@ -625,6 +713,8 @@ export class RoomManager {
               type: 'game_snapshot',
               phase: room.phase,
               roomCode: room.code,
+              mapSelection: room.mapSelection,
+              mapId: room.resolvedMapId,
               tick: 0
             };
         break;
@@ -696,7 +786,7 @@ export class RoomManager {
           }
         }
         this._broadcastSnapshot(room, allEvents.slice(-24));
-        resultData = { tick: room.sim.tick, phase: room.phase };
+        resultData = { tick: room.sim.tick, phase: room.phase, mapId: room.sim.mapId };
         break;
       }
       case 'simulateDisconnect': {
