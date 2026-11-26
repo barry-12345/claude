@@ -1,0 +1,107 @@
+{
+  "testId": "E2E-05",
+  "url": "http://127.0.0.1:4524/tennis/?netdebug=1",
+  "startTime": "2026-11-26T21:41:41.601Z",
+  "checks": {
+    "proxyPathIsolation": {
+      "/": 404,
+      "/assets/models/tennis_player.glb": 404,
+      "/health": 404,
+      "/ws": 404,
+      "/tennis/health": 200
+    },
+    "singleNetDebug": "NET / PERF DEBUG Mode: single FPS: 46 | Max: 250ms Avg: 8.5ms | P95: 25ms Tier: HIGH (Up: 0/1) ActiveDPR: 1.00 DrawCalls: 78 EstHz: 120Hz (60fps Cap) RTT: 0ms | Reconn: 0",
+    "onlineNetDebugP0": "NET / PERF DEBUG Mode: online FPS: 60 | Max: 3.2ms Avg: 2.2ms | P95: 3ms Tier: HIGH (Up: 0/1) ActiveDPR: 1.00 DrawCalls: 78 EstHz: 120Hz (60fps Cap) RTT: 0ms | Reconn: 0",
+    "onlineNetDebugP1": "NET / PERF DEBUG Mode: online FPS: 60 | Max: 25.1ms Avg: 3ms | P95: 3.3ms Tier: HIGH (Up: 0/1) ActiveDPR: 1.00 DrawCalls: 78 EstHz: 119Hz (60fps Cap) RTT: 0ms | Reconn: 0",
+    "glbRequests": {
+      "sp": [
+        {
+          "url": "http://127.0.0.1:4524/tennis/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "p0": [
+        {
+          "url": "http://127.0.0.1:4524/tennis/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "p1": [
+        {
+          "url": "http://127.0.0.1:4524/tennis/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ]
+    }
+  },
+  "errors": [],
+  "logsSummary": {
+    "sp": {
+      "name": "SingleSubpath",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4524/tennis/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "p0": {
+      "name": "OnlineP0",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4524/tennis/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4524/tennis/ws",
+          "closed": false,
+          "framesReceived": 45,
+          "framesSent": 81
+        }
+      ],
+      "webglInfo": null
+    },
+    "p1": {
+      "name": "OnlineP1",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4524/tennis/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4524/tennis/ws",
+          "closed": false,
+          "framesReceived": 45,
+          "framesSent": 82
+        }
+      ],
+      "webglInfo": null
+    }
+  },
+  "endTime": "2026-11-26T21:41:49.297Z"
+}

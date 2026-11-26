@@ -1,0 +1,218 @@
+{
+  "testId": "E2E-04",
+  "url": "http://127.0.0.1:4526/?test=1",
+  "startTime": "2026-11-26T21:39:36.612Z",
+  "checks": {
+    "part1Reconnect4s": {
+      "scoreBeforeDisc": {
+        "games": [
+          1,
+          0
+        ],
+        "points": [
+          2,
+          1
+        ]
+      },
+      "p0DuringDisc": "paused_disconnect",
+      "sawResuming": true,
+      "resumedSnap": {
+        "reconnectCount": 1,
+        "preservedGames": [
+          1,
+          0
+        ],
+        "preservedPoints": [
+          2,
+          1
+        ],
+        "posBefore": {
+          "x": -2.15,
+          "y": 0,
+          "z": 12.334999999999999
+        },
+        "posAfter": {
+          "x": -0.9332276128555173,
+          "y": 0,
+          "z": 12.334999999999999
+        },
+        "phaseAfterServe": "serve_ready"
+      }
+    },
+    "part2Forfeit": {
+      "phase": "match_over",
+      "winner": 0,
+      "modalCards": 1,
+      "modalText": "🏆 胜利！MATCH WINNER 对手断线超过 15 秒弃权，你获得胜利！ 你赛后统计对手 0Ace 发球直接得分0 0双误 (Double Faults)0 0%一发成功率0% 0制胜分 (Winners)0 0非受迫失误 (UE)0 0%CLEAN 甜点率0% 再来一局 (Rematch) 返回大厅",
+      "toasts": [
+        "比赛恢复！",
+        "对手已断线，等待重连 (15s)"
+      ]
+    },
+    "part3WaitingReload": {
+      "roomCode2": "BYDR",
+      "afterReloadState": {
+        "mode": "lobby",
+        "roomCode": "BYDR",
+        "wsConnected": true,
+        "lobbyVisible": true,
+        "hudHidden": true,
+        "domRoomCode": "BYDR"
+      },
+      "afterReadyStarted": {
+        "mode": "online",
+        "phase": "serve_ready"
+      }
+    }
+  },
+  "errors": [],
+  "logsSummary": {
+    "p0": {
+      "name": "P0",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 109,
+          "framesSent": 96
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "p1": {
+      "name": "P1",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": true,
+          "framesReceived": 29,
+          "framesSent": 45
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": true,
+          "framesReceived": 44,
+          "framesSent": 48
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "w0": {
+      "name": "W0",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 9,
+          "framesSent": 6
+        }
+      ],
+      "webglInfo": null
+    },
+    "w1": {
+      "name": "W1",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        },
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 2,
+          "framesSent": 1
+        },
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 6,
+          "framesSent": 4
+        }
+      ],
+      "webglInfo": null
+    }
+  },
+  "endTime": "2026-11-26T21:39:55.985Z"
+}

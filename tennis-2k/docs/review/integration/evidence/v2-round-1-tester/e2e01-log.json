@@ -1,0 +1,369 @@
+{
+  "testId": "E2E-01",
+  "url": "http://127.0.0.1:4522/",
+  "startTime": "2026-11-26T21:59:38.642Z",
+  "checks": {
+    "testHookUndefined": {
+      "p0": true,
+      "p1": true
+    },
+    "roomCode": "WY58",
+    "glbRequests": {
+      "p0": [
+        {
+          "url": "http://127.0.0.1:4522/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "p1": [
+        {
+          "url": "http://127.0.0.1:4522/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ]
+    },
+    "uiNoTakeover": {
+      "p0": {
+        "controlsText": "WASD/方向键 走位+左右 ·\n          J 打后强攻 ·\n          K 打前小球/削球 ·\n          L 挑高 ·\n          不按键放球",
+        "hasTakeover": false,
+        "pauseBtnP0": "⏸ 暂停 (Esc) [3]"
+      },
+      "p1": {
+        "controlsText": "WASD/方向键 走位+左右 ·\n          J 打后强攻 ·\n          K 打前小球/削球 ·\n          L 挑高 ·\n          不按键放球",
+        "hasTakeover": false,
+        "pauseBtnP1": "⏸ 暂停 (Esc) [3]"
+      }
+    },
+    "luminance": {
+      "p0": {
+        "width": 1280,
+        "height": 720,
+        "topRows": 251,
+        "top35MeanLuma": 172.3,
+        "fullMeanLuma": 151.77
+      },
+      "p1": {
+        "width": 1280,
+        "height": 720,
+        "topRows": 251,
+        "top35MeanLuma": 171.76,
+        "fullMeanLuma": 151.36
+      }
+    },
+    "pauseDuringMatch": {
+      "p0Btn": "⏸ 暂停 (Esc) [2]",
+      "p1Btn": "⏸ 暂停 (Esc) [3]",
+      "p0Modal": "比赛已暂停 发起方：你 · 剩余手动暂停次数：你 2 次 / 对手 3 次 60s 继续比赛 (Esc) 返回大厅",
+      "p1Modal": "比赛已暂停 发起方：对手 · 剩余手动暂停次数：你 3 次 / 对手 2 次 60s 继续比赛 (Esc) 返回大厅"
+    },
+    "resumingModal": "准备恢复比赛 3 倒计时结束即刻恢复，请做好接球准备",
+    "postResumeImmediateResponse": {
+      "before": "0-0 (15-0)",
+      "calloutAfterServe": "CLEAN · 216 km/h"
+    },
+    "matchOverReached": true,
+    "matchOverStats": {
+      "title": "🏆 胜利！MATCH WINNER",
+      "rows": [
+        [
+          "17",
+          "Ace 发球直接得分",
+          "14"
+        ],
+        [
+          "0",
+          "双误 (Double Faults)",
+          "0"
+        ],
+        [
+          "100%",
+          "一发成功率",
+          "100%"
+        ],
+        [
+          "21",
+          "制胜分 (Winners)",
+          "14"
+        ],
+        [
+          "0",
+          "非受迫失误 (UE)",
+          "0"
+        ],
+        [
+          "81%",
+          "CLEAN 甜点率",
+          "100%"
+        ]
+      ]
+    },
+    "rematchReset": {
+      "p0": {
+        "myServing": true,
+        "oppServing": false,
+        "myGames": "0",
+        "myPoints": "0",
+        "oppGames": "0",
+        "oppPoints": "0",
+        "head": "红土 · 法网红土\n            FAST4 · 一发",
+        "callout": "",
+        "modalVisible": false,
+        "modalText": "",
+        "pauseBtn": "⏸ 暂停 (Esc) [3]"
+      },
+      "p1": {
+        "myServing": false,
+        "oppServing": true,
+        "myGames": "0",
+        "myPoints": "0",
+        "oppGames": "0",
+        "oppPoints": "0",
+        "head": "红土 · 法网红土\n            FAST4 · 一发",
+        "callout": "",
+        "modalVisible": false,
+        "modalText": "",
+        "pauseBtn": "⏸ 暂停 (Esc) [3]"
+      }
+    },
+    "superTiebreak": {
+      "bannerText": "SUPER TIEBREAK · 超级抢十",
+      "muteTextAfter": "🔇 静音",
+      "muteTextRestored": "🔊 音效"
+    }
+  },
+  "scoreHistory": [
+    {
+      "tMs": 3,
+      "sig": "0-0:15-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 2600,
+      "sig": "0-0:30-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 5183,
+      "sig": "0-0:40-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 7769,
+      "sig": "1-0:0-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 11399,
+      "sig": "1-0:15-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 16833,
+      "sig": "1-0:30-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 20465,
+      "sig": "1-0:30-15:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 24079,
+      "sig": "1-0:30-30:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 27691,
+      "sig": "1-0:30-40:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 31292,
+      "sig": "1-1:0-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 33880,
+      "sig": "1-1:15-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 36480,
+      "sig": "1-1:30-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 39067,
+      "sig": "1-1:40-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 42950,
+      "sig": "2-1:0-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 46574,
+      "sig": "2-1:0-15:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 50178,
+      "sig": "2-1:0-30:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 53800,
+      "sig": "2-1:0-40:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 57426,
+      "sig": "2-2:0-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 60015,
+      "sig": "2-2:15-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 62620,
+      "sig": "2-2:30-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 66518,
+      "sig": "2-2:40-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 69117,
+      "sig": "3-2:0-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 72717,
+      "sig": "3-2:0-15:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 76318,
+      "sig": "3-2:0-30:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 79929,
+      "sig": "3-2:0-40:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 83541,
+      "sig": "3-3:0-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 86120,
+      "sig": "3-3:1-0:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 89726,
+      "sig": "3-3:1-1:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 93342,
+      "sig": "3-3:1-2:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 95941,
+      "sig": "3-3:2-2:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 98549,
+      "sig": "3-3:3-2:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 102170,
+      "sig": "3-3:4-2:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 107593,
+      "sig": "3-3:5-2:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 110183,
+      "sig": "3-3:6-2:红土 · 法网红土\n            FAST4 · 一发"
+    },
+    {
+      "tMs": 112778,
+      "sig": "4-3:7-2:红土 · 法网红土\n            FAST4 · 一发"
+    }
+  ],
+  "errors": [],
+  "logsSummary": {
+    "p0": {
+      "name": "P0",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4522/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4522/?token=dUHXiXU2eZ5W",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 4
+        },
+        {
+          "url": "ws://127.0.0.1:4522/ws",
+          "closed": false,
+          "framesReceived": 3950,
+          "framesSent": 4962
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "p1": {
+      "name": "P1",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4522/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4522/?token=dUHXiXU2eZ5W",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 4
+        },
+        {
+          "url": "ws://127.0.0.1:4522/ws",
+          "closed": false,
+          "framesReceived": 3949,
+          "framesSent": 4954
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "stb": {
+      "name": "STB",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4522/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4522/?token=dUHXiXU2eZ5W",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        }
+      ],
+      "webglInfo": null
+    }
+  },
+  "endTime": "2026-11-26T22:01:49.041Z"
+}

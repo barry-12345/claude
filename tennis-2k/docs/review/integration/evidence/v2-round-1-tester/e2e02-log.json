@@ -1,0 +1,146 @@
+{
+  "testId": "E2E-02",
+  "url": "http://127.0.0.1:4526/?test=1",
+  "startTime": "2026-11-26T21:36:43.129Z",
+  "checks": {
+    "avatars": {
+      "p0": {
+        "loaded": true,
+        "source": "glb",
+        "triangles": 4640
+      },
+      "p1": {
+        "loaded": true,
+        "source": "glb",
+        "triangles": 4640
+      }
+    },
+    "sub1LetBallPass": {
+      "points": [
+        1,
+        0
+      ],
+      "p1TotalShots": 0,
+      "phase": "serve_ready"
+    },
+    "sub2Dropshot": {
+      "p1ArmedSnap": {
+        "armedAction": "K",
+        "holdDurationSec": 0.03333333333333333,
+        "bufferRemainingSec": 0,
+        "lastConsumedHitTick": -1,
+        "lockedAimX": 0,
+        "lastQuality": null
+      },
+      "p1HitInfo": {
+        "tick": 330,
+        "lastShotType": "dropshot",
+        "lastShotQuality": "CLEAN",
+        "ballPosLocalP1": {
+          "x": -2.221105652939677,
+          "y": 0.7735463198113243,
+          "z": 11.700891349787836
+        },
+        "ballVelLocalP1": {
+          "x": -1.331443339484383,
+          "y": 6.561130015843919,
+          "z": -12.429577869531544
+        },
+        "predictedLandingLocalP1": {
+          "x": -3.78018017481776,
+          "y": 0.0335,
+          "z": -2.8537183729142455
+        }
+      },
+      "p0MirroredInfo": {
+        "tick": 396,
+        "lastShotType": "dropshot",
+        "ballPosLocalP0": {
+          "x": 3.4878897486554035,
+          "y": 1.6996913558711884,
+          "z": 0.12506556076339065
+        },
+        "ballVelLocalP0": {
+          "x": 1.011260462004733,
+          "y": -4.283079676815041,
+          "z": 9.440537412379852
+        },
+        "predictedLandingLocalP0": {
+          "x": 3.78018017481776,
+          "y": 0.0335,
+          "z": 2.8537183729142455
+        }
+      }
+    }
+  },
+  "errors": [],
+  "logsSummary": {
+    "p0": {
+      "name": "P0",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 218,
+          "framesSent": 294
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "p1": {
+      "name": "P1",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 218,
+          "framesSent": 296
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    }
+  },
+  "endTime": "2026-11-26T21:36:54.637Z"
+}

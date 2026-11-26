@@ -1,0 +1,206 @@
+{
+  "testId": "E2E-03",
+  "url": "http://127.0.0.1:4526/?test=1",
+  "startTime": "2026-11-26T21:37:53.418Z",
+  "checks": {
+    "case1In8cm": {
+      "opts": {
+        "inBounds": true,
+        "distCm": 8,
+        "line": "sideline"
+      },
+      "hk0": {
+        "active": true,
+        "elapsedSec": 0,
+        "durationSec": 1.8,
+        "bouncePos": {
+          "x": 4.042322686177038,
+          "y": 0.0335,
+          "z": -7.536260894411761
+        },
+        "isIn": true,
+        "distanceToLineCm": 7.27,
+        "lineType": "sideline"
+      },
+      "hk1": {
+        "active": true,
+        "elapsedSec": 0,
+        "durationSec": 1.8,
+        "bouncePos": {
+          "x": -4.042322686177038,
+          "y": 0.0335,
+          "z": 7.536260894411761
+        },
+        "isIn": true,
+        "distanceToLineCm": 7.27,
+        "lineType": "sideline"
+      },
+      "afterEnd": {
+        "beforeMove": {
+          "p0X": -1.45,
+          "p1X": -2.15,
+          "p0Diag": {
+            "attached": true,
+            "pressedCount": 0,
+            "rebindCount": 3,
+            "lastResetReason": "HAWKEYE_END"
+          },
+          "p1Diag": {
+            "attached": true,
+            "pressedCount": 0,
+            "rebindCount": 3,
+            "lastResetReason": "HAWKEYE_END"
+          }
+        },
+        "afterMove": {
+          "p0X": -0.6088317988063326,
+          "p1X": -2.9022504915011575
+        },
+        "score": [
+          1,
+          0
+        ]
+      }
+    },
+    "case2Out10cm": {
+      "opts": {
+        "inBounds": false,
+        "distCm": 10,
+        "line": "sideline"
+      },
+      "hk0": {
+        "active": true,
+        "elapsedSec": 0.03333333333333333,
+        "durationSec": 1.8,
+        "bouncePos": {
+          "x": 4.222747999795909,
+          "y": 0.0335,
+          "z": -7.536556748709406
+        },
+        "isIn": false,
+        "distanceToLineCm": 10.77,
+        "lineType": "sideline"
+      },
+      "hk1": {
+        "active": true,
+        "elapsedSec": 0.03333333333333333,
+        "durationSec": 1.8,
+        "bouncePos": {
+          "x": -4.222747999795909,
+          "y": 0.0335,
+          "z": 7.536556748709406
+        },
+        "isIn": false,
+        "distanceToLineCm": 10.77,
+        "lineType": "sideline"
+      },
+      "afterEnd": {
+        "beforeMove": {
+          "p0X": 1.45,
+          "p1X": 2.15,
+          "p0Diag": {
+            "attached": true,
+            "pressedCount": 0,
+            "rebindCount": 4,
+            "lastResetReason": "HAWKEYE_END"
+          },
+          "p1Diag": {
+            "attached": true,
+            "pressedCount": 0,
+            "rebindCount": 4,
+            "lastResetReason": "HAWKEYE_END"
+          }
+        },
+        "afterMove": {
+          "p0X": 2.4811669900134685,
+          "p1X": 1.2157736877358614
+        },
+        "score": [
+          1,
+          1
+        ]
+      }
+    },
+    "case3Out25cm": {
+      "before": [
+        1,
+        1
+      ],
+      "after": [
+        1,
+        2
+      ],
+      "sawHawkeye": false
+    }
+  },
+  "errors": [],
+  "logsSummary": {
+    "p0": {
+      "name": "P0",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 315,
+          "framesSent": 296
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    },
+    "p1": {
+      "name": "P1",
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "httpErrors": [],
+      "failedRequests": [],
+      "glbRequests": [
+        {
+          "url": "http://127.0.0.1:4526/assets/models/tennis_player.glb",
+          "status": 200
+        }
+      ],
+      "wsEvents": [
+        {
+          "url": "ws://127.0.0.1:4526/?token=eHq7rUWknI7V",
+          "closed": false,
+          "framesReceived": 1,
+          "framesSent": 0
+        },
+        {
+          "url": "ws://127.0.0.1:4526/ws",
+          "closed": false,
+          "framesReceived": 314,
+          "framesSent": 293
+        }
+      ],
+      "webglInfo": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "vendor": "Google Inc. (Intel)",
+        "renderer": "ANGLE (Intel, Intel(R) Arc(TM) 130T GPU (16GB) (0x00007D51) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+      }
+    }
+  },
+  "endTime": "2026-11-26T21:38:07.594Z"
+}
