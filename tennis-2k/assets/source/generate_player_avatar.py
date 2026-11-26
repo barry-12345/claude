@@ -444,8 +444,9 @@ def build_body_mesh(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types.Materia
         (1.135, 0.010, 0.158, 0.114, "Mat_JerseyPrimary", 2.15), # Ribcage
         (1.185, 0.012, 0.170, 0.119, "Mat_JerseyAccent", 2.2),   # Chest stripe
         (1.228, 0.014, 0.174, 0.118, "Mat_JerseyPrimary", 2.2),  # Upper chest
-        (1.310, 0.010, 0.160, 0.108, "Mat_JerseyPrimary", 2.2),  # Shoulder yoke
-        (1.360, 0.006, 0.116, 0.088, "Mat_JerseyPrimary", 2.1),  # Trapezius slope
+        (1.288, 0.011, 0.173, 0.112, "Mat_JerseyPrimary", 2.15), # Upper chest / armpit level
+        (1.330, 0.008, 0.146, 0.098, "Mat_JerseyPrimary", 2.1),  # Rounded shoulder slope
+        (1.362, 0.006, 0.104, 0.080, "Mat_JerseyPrimary", 2.05), # Trapezius slope
         (1.380, 0.006, 0.072, 0.068, "Mat_JerseyAccent", 2.0),   # Collar rim
         (1.402, 0.008, 0.064, 0.062, "Mat_Skin", 2.0),           # Collar top -> neck
         (1.392, 0.008, 0.056, 0.056, "Mat_Skin", 2.0),           # Neck base inside collar (sturdier!)
@@ -504,10 +505,11 @@ def build_body_mesh(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types.Materia
     #    No deep protruding inner cap -> zero armpit spikes when arms raise!
     # -----------------------------------------------------------------------
     for side_sign, part_id in ((-1.0, PART_ARM_L), (1.0, PART_ARM_R)):
-        p_sh_root = Vector((side_sign * 0.146, 0.006, 1.304))
-        p_sh_cap = Vector((side_sign * 0.175, 0.005, 1.308))
-        p_ua_mid = Vector((side_sign * 0.252, 0.010, 1.236))
-        p_ua_cuff = Vector((side_sign * 0.270, 0.012, 1.216))
+        p_sh_root = Vector((side_sign * 0.128, 0.008, 1.278))
+        p_sh_in = Vector((side_sign * 0.160, 0.008, 1.268))
+        p_sh_cap = Vector((side_sign * 0.194, 0.009, 1.250))
+        p_ua_mid = Vector((side_sign * 0.246, 0.010, 1.220))
+        p_ua_cuff = Vector((side_sign * 0.268, 0.012, 1.204))
         p_el = Vector((side_sign * 0.340, 0.020, 1.140))
         p_fa_mid = Vector((side_sign * 0.418, 0.042, 1.042))
         p_wr = Vector((side_sign * 0.480, 0.060, 0.960))
@@ -515,11 +517,12 @@ def build_body_mesh(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types.Materia
         p_fingers = Vector((side_sign * 0.542, 0.082, 0.875))
 
         arm_stations = [
-            (p_sh_root, 0.056, 0.060, "Mat_JerseyPrimary"),
-            (p_sh_cap, 0.063, 0.063, "Mat_JerseyPrimary"),
-            (p_ua_mid, 0.059, 0.058, "Mat_JerseyAccent"),
-            (p_ua_cuff, 0.061, 0.060, "Mat_Skin"),
-            (p_ua_cuff - Vector((side_sign * 0.007, 0.0, -0.007)), 0.046, 0.045, "Mat_Skin"),
+            (p_sh_root, 0.044, 0.052, "Mat_JerseyPrimary"),
+            (p_sh_in, 0.051, 0.056, "Mat_JerseyPrimary"),
+            (p_sh_cap, 0.051, 0.055, "Mat_JerseyPrimary"),
+            (p_ua_mid, 0.052, 0.053, "Mat_JerseyAccent"),
+            (p_ua_cuff, 0.053, 0.053, "Mat_Skin"),
+            (p_ua_cuff - Vector((side_sign * 0.007, 0.0, -0.007)), 0.044, 0.044, "Mat_Skin"),
             (p_el, 0.041, 0.040, "Mat_Skin"),
             (p_fa_mid, 0.043, 0.041, "Mat_Skin"),
             (p_wr, 0.031, 0.028, "Mat_Skin"),
@@ -709,7 +712,7 @@ def build_body_mesh(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types.Materia
         mat_idx["Mat_Skin"],
         part_layer=part_layer,
         part_id=PART_HEAD,
-        subdiv=2,
+        subdiv=1,
         rot_euler=(-0.15, 0.0, 0.0),
     )
 
@@ -773,9 +776,9 @@ def build_body_mesh(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types.Materia
     # 5. Cohesive Sculpted Stylized Hair (Natural athletic volume, NO top bun,
     #    ZERO banana tubes, ZERO temple bald patches, and strictly inside Cap!)
     # -----------------------------------------------------------------------
-    ret_hair = bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.0)
+    ret_hair = bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=12, radius=1.0)
     hair_verts = ret_hair["verts"]
-    hair_center = Vector((0.0, 0.001, 1.564))
+    hair_center = Vector((0.0, 0.001, 1.565))
     for v in hair_verts:
         p = v.co.copy()
         az = math.atan2(p.x, p.y)
@@ -789,10 +792,11 @@ def build_body_mesh(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types.Materia
         if abs(az) >= 1.15 and p.z < -0.30:
             p.z = -0.30 + (p.z + 0.30) * 0.25
 
-        rx, ry, rz = 0.111, 0.117, 0.126
-        if p.z > 0.35:
-            # Gentle full athletic crown wave (maxZ ~ 1.696 m, smoothly integrated, no round bun!)
-            rz = 0.132
+        # Smooth rounded athletic dome (ZERO cone step discontinuity)
+        crown_round = 1.0 + 0.028 * math.sin(max(0.0, p.z) * math.pi)
+        rx = 0.111 * crown_round
+        ry = 0.117 * crown_round
+        rz = 0.128
         v.co = hair_center + Vector((p.x * rx, p.y * ry, p.z * rz))
         v[part_layer] = PART_HEAD
 
@@ -1007,8 +1011,8 @@ def build_headgear_headband(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types
     add_torus_band(
         bm,
         Vector((0.0, 0.001, 1.616)),
-        0.112,
-        0.119,
+        0.1112,
+        0.1195,
         0.006,
         0.014,
         22,
@@ -1054,8 +1058,8 @@ def build_headgear_visor(arm_obj: bpy.types.Object, mats: Dict[str, bpy.types.Ma
     add_torus_band(
         bm,
         Vector((0.0, 0.001, 1.616)),
-        0.1125,
-        0.1195,
+        0.1120,
+        0.1198,
         0.007,
         0.016,
         22,

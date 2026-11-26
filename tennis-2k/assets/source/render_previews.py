@@ -1,17 +1,19 @@
-"""Blender 5.2 EEVEE studio preview renderer for exported tennis_player.glb (V2 Round 2).
+"""Blender 5.2 EEVEE studio preview renderer for exported tennis_player.glb (V2 Round 3).
 
 Imports the actual exported .glb back into Blender and renders comprehensive
 multi-angle, headgear-closeup, shoe/shorts-closeup, all-clip action stress,
 and 4-archetype lineup evidence under:
-  tennis-2k/docs/review/wp-asset/evidence/v2-round-2/
+  tennis-2k/docs/review/wp-asset/evidence/v2-round-3/
 
 Usage:
   blender --background --python tennis-2k/assets/source/render_previews.py
+  blender --background --python tennis-2k/assets/source/render_previews.py -- <glb_path> <out_dir>
 """
 
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -21,7 +23,14 @@ from mathutils import Vector
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_GLB = REPO_ROOT / "client" / "public" / "assets" / "models" / "tennis_player.glb"
-EVIDENCE_DIR = REPO_ROOT / "docs" / "review" / "wp-asset" / "evidence" / "v2-round-2"
+EVIDENCE_DIR = REPO_ROOT / "docs" / "review" / "wp-asset" / "evidence" / "v2-round-3"
+
+if "--" in sys.argv:
+    _extra = sys.argv[sys.argv.index("--") + 1 :]
+    if len(_extra) >= 1 and _extra[0]:
+        DEFAULT_GLB = Path(_extra[0]).resolve()
+    if len(_extra) >= 2 and _extra[1]:
+        EVIDENCE_DIR = Path(_extra[1]).resolve()
 
 
 def srgb_to_linear(hex_color: str) -> Tuple[float, float, float, float]:
@@ -262,16 +271,19 @@ def main() -> None:
     ensure_camera((0.95, 1.55, 0.44), (0.0, 0.04, 0.36), lens=56.0)
     render_to("04_closeup_shoes_shorts.png")
 
-    # Pass 2: Headgear 3/4 Closeups (Visor + CapBackwards + Headband side-by-side)
+    # Pass 2: Headgear 3/4 Closeups (Visor + CapBackwards + Headband unobstructed framing)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.render.fps = 100
     setup_daylight_studio()
-    for arch_id, ox, rdeg in [("defender", -0.58, 28.0), ("serve_volley", 0.0, -24.0), ("power", 0.58, 22.0)]:
+    for arch_id, ox, rdeg in [("defender", -0.60, 42.0), ("serve_volley", 0.0, -24.0), ("power", 0.60, 26.0)]:
         a, m = import_avatar(ox, rot_z_deg=rdeg)
         configure_archetype(m, a, arch_id)
         align_clip_at_frame(a, "idle", 0.0, 1)
+    for o in bpy.data.objects:
+        if "Racquet" in o.name:
+            o.hide_render = True
     bpy.context.scene.frame_set(1)
-    ensure_camera((0.0, 1.95, 1.58), (0.0, 0.0, 1.50), lens=62.0)
+    ensure_camera((0.0, 2.40, 1.56), (0.0, 0.0, 1.50), lens=50.0)
     render_to("05_headgear_34_closeups.png")
 
     # Pass 3: Serve Toss + Forehand Contact
