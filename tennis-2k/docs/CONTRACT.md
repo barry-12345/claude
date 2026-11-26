@@ -1,25 +1,29 @@
-# 《Court 2K：大满贯时代》V1 跨工作包接口与协议契约（CONTRACT）
+# 《Court 2K：大满贯时代》V2 跨工作包接口、协议与资产契约（CONTRACT）
 
-- **单一事实源（SSOT）归属**：Notion 为主本（`https://app.notion.com/p/423641bcf097816c9068fd48f36120b9`），本文件 `tennis-2k/docs/CONTRACT.md` 为仓库执行副本。
-- **审批状态**：已获用户批准 · `2026-11-25`（Round 2 契约修订版，补齐全部跨包类型、镜像事件、竞态状态机与 workspaces 写边界）
-- **版本号**：`V1`
+- **单一事实源（SSOT）归属**：Obsidian 为主本（`G:\我的云端硬盘\Barry's obsidian\99_System\Data\Quick_Notes\Notes\Court 2K：大满贯时代 · V2 规划与版本页.md`），本文件 `tennis-2k/docs/CONTRACT.md` 为仓库执行副本。
+- **审批状态**：已获用户批准开工 · `2026-11-27`（决策 1A / 2A、增量假设 C-01~C-03 全部生效；Round 2 契约闭环修订版）
+- **版本号**：`V2`
+- **代码基点**：`feat/tennis-2k-v2 @ ee66efd5f59e8cd6e248c78ad9507be6e52bf576`
 - **关联规格**：[`docs/SPEC.md`](./SPEC.md)
 - **变更纪律**：并行开工后严禁任何工作包私下修改本契约；确需变更时必须经调度员同步通知所有相关 Builder 与 Reviewer，并在涉及产品行为时回到用户确认。
 
 ---
 
-## 一、Workspace 包结构与模块约定
+## 一、Workspace 包结构与纯度约定
 
 ```text
-tennis-2k/package.json         # workspaces: ["shared", "client", "server"]
-├─ shared/package.json         # name: "@court2k/shared", type: "module"
-├─ client/package.json         # name: "@court2k/client", type: "module", depends on "@court2k/shared": "*"
-└─ server/package.json         # name: "@court2k/server", type: "module", depends on "@court2k/shared": "*"
+tennis-2k/package.json                 # workspaces: ["shared", "client", "server"]（V2 零新增 npm 依赖）
+├─ assets/source/                      # WP-Asset 独占：Blender 5.2 Python 生成脚本与资产清单
+├─ shared/package.json                 # name: "@court2k/shared", type: "module"
+├─ client/package.json                 # name: "@court2k/client", type: "module", depends on "@court2k/shared": "*", "three": "^0.174.0"
+│  └─ public/assets/models/tennis_player.glb  # WP-Asset 导出，WP2 只读加载
+└─ server/package.json                 # name: "@court2k/server", type: "module", depends on "@court2k/shared": "*"
 ```
 
-- **模块规范**：三包统一 `"type": "module"`，TypeScript `target: "ES2022"`、`module: "ESNext"`、`moduleResolution: "Bundler"`，保证 `npm run build`、Vite、`tsx`、`vitest` 与纯 `node` 生产启动零路径冲突。
-- **`@court2k/shared` 统一导出入口**：所有常量、状态/协议类型（含 `ClientMessage`、`ServerMessage`、`ErrorCode`、`TestCommandPayload`、`ScorePatch`、`PRNG`、`BallisticSolveParams`/`Result`）与纯函数均从 `shared/src/index.ts`（构建后 `shared/dist/index.js` + `index.d.ts`）统一导出；`client/` 与 `server/` **严禁**深路径 import `shared/src/...` 内部子文件。
-- **纯度约束**：`@court2k/shared` 严禁引用任何浏览器 DOM（`window`/`document`）、`three` 或 Node 专属 API（`fs`/`ws`/`process`），保证前后端 100% 同构执行。
+- **模块规范**：三包统一 `"type": "module"`、`target: "ES2022"`、`module: "ESNext"`、`moduleResolution: "Bundler"`。
+- **`@court2k/shared` 统一导出入口**：所有常量、状态/协议/诊断类型（含 `InputDiagnostics`、`TestStateSnapshot`）与纯函数（含 `cloneMatchState`）均由 `shared/src/index.ts`（构建产物 `shared/dist/index.js` + `index.d.ts`）统一导出；`client/` 与 `server/` **严禁**深路径导入 `shared/src/...`。
+- **纯度约束**：`@court2k/shared` 严禁引用任何浏览器 DOM（`window`/`document`）、`three` 或 Node 专属 API（`fs`/`ws`/`process`）。
+- **零 V1 废弃残留约束**：V2 源码中严禁保留 `MeterState`、`InputPhase`、`takeover*`、`TAKEOVER_ON`、`TAKEOVER_OFF`、`set_takeover`、`ArchetypeConfig.timing`、`perfectShots`、`totalMeterShots`、`SHOT_METER_MULT`、`METER_*`。
 
 ---
 
@@ -36,12 +40,18 @@ export type PlayerSide = 1 | -1;     // +1 = P0(+Z近端), -1 = P1(-Z远端)
 export type PlayerIndex = 0 | 1;     // 0 对应 side=+1, 1 对应 side=-1
 
 export type ShotActionKey = 'none' | 'J' | 'K' | 'L';
-export type InputPhase = 'idle' | 'hold' | 'release';
 export type ShotType = 'serve_flat' | 'serve_kick' | 'topspin' | 'slice' | 'dropshot' | 'lob';
-export type ShotQuality = 'PERFECT' | 'GOOD' | 'EARLY' | 'LATE' | 'VERY_EARLY' | 'VERY_LATE';
+export type ShotQuality = 'CLEAN' | 'SOLID' | 'STRETCH';
+
 export type PlayerAnimState =
-  | 'idle' | 'run' | 'slide' | 'serve_toss'
-  | 'forehand' | 'backhand' | 'lob' | 'celebrate';
+  | 'idle'
+  | 'run'
+  | 'slide'
+  | 'serve_toss'
+  | 'forehand'
+  | 'backhand'
+  | 'lob'
+  | 'celebrate';
 
 export type MatchPhase =
   | 'waiting'
@@ -58,8 +68,13 @@ export type MatchPhase =
 export type ActivePlayPhase = 'serve_ready' | 'serve_toss' | 'rally';
 
 export type KeyPointLabel =
-  | 'NONE' | 'BREAK_POINT' | 'DECIDING_POINT'
-  | 'SET_POINT' | 'MATCH_POINT' | 'TIEBREAK';
+  | 'NONE'
+  | 'BREAK_POINT'
+  | 'DECIDING_POINT'
+  | 'SET_POINT'
+  | 'MATCH_POINT'
+  | 'TIEBREAK'
+  | 'SUPER_TIEBREAK';
 
 export type ErrorCode =
   | 'INVALID_MESSAGE'
@@ -95,6 +110,27 @@ export const COURT_DIM = {
   RESUME_COUNTDOWN_SEC: 3,
 } as const;
 
+export const PHYSICS_CONSTANTS = {
+  GRAVITY: 9.81,
+  DRAG_COEFF: 0.022,
+  MAGNUS_COEFF: 0.00055,
+  BOUNCE_SPIN_DECAY: 0.65,
+  NET_LET_TOLERANCE_M: 0.02,
+  NET_LET_SPEED_SCALE: 0.65,
+  PLAYER_ACCEL_TIME_SEC: 0.28,
+  BASE_COMFORT_RADIUS_M: 1.05,
+  COMFORT_RADIUS_PER_CTL_M: 0.008,
+  BASE_REACH_RADIUS_M: 1.48,
+  SLIDE_REACH_RADIUS_M: 1.90,
+  SLIDE_TRIGGER_MIN_DIST_M: 1.35,
+  SLIDE_TRIGGER_MAX_DIST_M: 2.55,
+  SLIDE_TRIGGER_TIME_SEC: 0.55,
+  TAP_MAX_HOLD_SEC: 0.20,
+  PRE_INPUT_BUFFER_SEC: 0.35,
+  SERVE_TOSS_DURATION_SEC: 0.32,
+  POINT_OVER_DURATION_SEC: 1.15,
+} as const;
+
 export interface CourtConfig {
   readonly id: CourtId;
   readonly label: string;
@@ -116,17 +152,20 @@ export interface ArchetypeConfig {
   readonly power: number;
   readonly speed: number;
   readonly spin: number;
-  readonly timing: number;
-  readonly net: number;              // power+speed+spin+timing+net === 400
+  readonly control: number;          // V2 CTL（替代 V1 timing）
+  readonly net: number;              // 严格满足 power+speed+spin+control+net === 400
   readonly jerseyPrimary: string;
   readonly jerseyAccent: string;
+  readonly shortsColor: string;
+  readonly hairColor: string;
+  readonly skinTone: string;
   readonly headgear: 'headband' | 'wristband_only' | 'visor' | 'cap_backwards';
-  readonly shoulderScale: number;
+  readonly shoulderScale: number;    // power 1.10 | allcourt 1.00 | serve_volley 1.03 | defender 0.94
 }
 export const ARCHETYPES: Readonly<Record<ArchetypeId, ArchetypeConfig>>;
 ```
 
-### 2.2 核心状态、物理辅助与测试指令类型（均由 `@court2k/shared` 统一导出）
+### 2.2 核心状态、输入帧、测试指令与诊断快照类型（均由 `@court2k/shared` 唯一导出）
 
 ```ts
 export interface Vec3 { x: number; y: number; z: number; }
@@ -139,37 +178,37 @@ export interface PRNG {
 
 export interface BallisticSolveParams {
   origin: Vec3;
-  target: Vec3;                      // 期望地面首次触地点（y = COURT_DIM.BALL_RADIUS）
-  desiredSpeedXZ: number;            // 期望水平初速 m/s
-  spin: Vec3;                        // rad/s
-  minNetClearanceM: number;          // 过网安全余量（m）
-  peakHeightMinM?: number;           // 挑高球 L 最低顶点高度（如 5.2 m）
+  target: Vec3;
+  desiredSpeedXZ: number;
+  spin: Vec3;
+  minNetClearanceM: number;
+  peakHeightMinM?: number;
 }
 
 export interface BallisticSolveResult {
-  vel: Vec3;                         // 解算出的初速度向量 m/s
-  flightTimeSec: number;             // 预计首次落地时间 s
-  predictedLanding: Vec3;            // 经 3 次迭代后的验证落点
+  vel: Vec3;
+  flightTimeSec: number;
+  predictedLanding: Vec3;
   clearsNet: boolean;
 }
 
 export interface PlayerInputFrame {
-  seq: number;                       // 单调递增输入序号（单机按 tick 递增，联机见 §3.2 复位规则）
+  seq: number;
   moveX: number;                     // [-1, 1]
   moveZ: number;                     // [-1, 1]
-  aimX: number;                      // [-1, 1] 松手瞬间的落点方向
-  aimZ: number;                      // [-1, 1]
-  action: ShotActionKey;             // 'none' | 'J' | 'K' | 'L'
-  phase: InputPhase;                 // 'idle' | 'hold' | 'release'
+  aimX: number;                      // [-1, 1] 触球左右瞄准
+  aimZ: number;                      // [-1, 1] 触球深浅微调
+  action: ShotActionKey;             // 'none' | 'J' | 'K' | 'L' 当前按住键
+  actionPressed: boolean;            // 本 tick 是否新按下（边沿触发）
 }
 
-export interface MeterState {
-  active: boolean;
-  action: ShotActionKey;
-  progress: number;                  // [0, 1.18]
-  sweetCenter: number;               // 0.78
-  effectiveHalfWidth: number;
-  lastQuality: ShotQuality | null;
+export interface ShotStanceState {
+  armedAction: ShotActionKey;        // 'none' | 'J' | 'K' | 'L'
+  holdDurationSec: number;           // 连续按住时长；松手时 <0.20s 进 0.35s 缓冲，>=0.20s 立即取消
+  bufferRemainingSec: number;        // 短按松手后预输入缓冲剩余秒数
+  lastConsumedHitTick: number;       // 防止同一来球重复触发，初始 -1
+  lockedAimX: number;                // 发球锁存规范世界坐标 aimX（[-1, 1]）
+  lastQuality: ShotQuality | null;   // 'CLEAN' | 'SOLID' | 'STRETCH' | null
 }
 
 export interface PlayerState {
@@ -183,50 +222,46 @@ export interface PlayerState {
   animTime: number;
   isSliding: boolean;
   slideTimer: number;
-  moveAccelTime: number;             // [0, 0.28] 自动加速计时
-  meter: MeterState;
-  takeoverEnergy: number;            // [0, 100]
-  takeoverPointsLeft: number;        // 0 | 1 | 2
-  takeoverCooldown: boolean;         // 结束后冷却 1 分
+  moveAccelTime: number;
+  stance: ShotStanceState;
 }
 
 export interface BallState {
   pos: Vec3;
   vel: Vec3;
-  spin: Vec3;                        // rad/s
+  spin: Vec3;
   active: boolean;
   bounces: number;
-  touchedNet: boolean;               // 跨 tick：发球擦网落地判 LET 必需
-  hitTick: number;                   // 跨 tick：AI 反应延迟（240/140/70 ms）纯函数判定必需
-  firstBouncePos: Vec3 | null;       // 跨 tick：二跳/制胜分终结时回溯首跳触发鹰眼必需
+  touchedNet: boolean;
+  hitTick: number;
+  firstBouncePos: Vec3 | null;
   firstBounceInBounds: boolean | null;
   lastHitter: PlayerIndex | null;
   lastShotType: ShotType | null;
   lastShotQuality: ShotQuality | null;
-  speedKmhDisplay: number;           // 转播显示球速（km/h）
+  speedKmhDisplay: number;
   predictedLanding: Vec3 | null;
 }
 
 export interface HawkeyeState {
   active: boolean;
   elapsedSec: number;
-  durationSec: number;               // 1.8
-  bouncePos: Vec3;                   // 规范世界坐标
+  durationSec: number;
+  bouncePos: Vec3;
   isIn: boolean;
-  distanceToLineCm: number;          // 距最近有效线厘米值（≥0）
+  distanceToLineCm: number;
   lineType: 'sideline' | 'baseline' | 'service_line' | 'center_service_line';
 }
 
 export interface PauseState {
   reason: 'none' | 'manual' | 'disconnect';
   initiatedBy: PlayerIndex | null;
-  /** 仅保存真实比赛阶段（serve_ready / serve_toss / rally），严禁被 paused_manual 或 resuming 覆盖 */
   pausedFromPhase: ActivePlayPhase | null;
-  remainingSec: number;              // manual: <=60s；disconnect: 掉线方最小剩余宽限秒数 <=15s
-  resumeCountdownSec: number;        // resuming 阶段 3.0 → 0.0
-  manualPausesLeft: [number, number];// 初始 [3, 3]
-  disconnected: [boolean, boolean];  // 独立追踪双方连接态（封闭双断线竞态）
-  disconnectRemainingSec: [number, number]; // 双方独立 15s 宽限计时器
+  remainingSec: number;
+  resumeCountdownSec: number;
+  manualPausesLeft: [number, number];
+  disconnected: [boolean, boolean];
+  disconnectRemainingSec: [number, number];
 }
 
 export interface PlayerMatchStats {
@@ -236,16 +271,16 @@ export interface PlayerMatchStats {
   firstServesTotal: number;
   winners: number;
   unforcedErrors: number;
-  perfectShots: number;
-  totalMeterShots: number;
+  cleanShots: number;
+  totalShots: number;
 }
 
 export interface ScoreState {
   format: MatchFormat;
   games: [number, number];
-  points: [number, number];          // 常规局 0/1/2/3 对应 0/15/30/40；抢七/抢十为真实数字
+  points: [number, number];
   isTiebreak: boolean;
-  isDecidingPoint: boolean;          // Fast4 40-40 金球
+  isDecidingPoint: boolean;
   server: PlayerIndex;
   serveNumber: 1 | 2;
   courtSide: 'deuce' | 'ad';
@@ -258,7 +293,7 @@ export interface MatchConfig {
   court: CourtId;
   format: MatchFormat;
   archetypes: [ArchetypeId, ArchetypeId];
-  aiDifficulty?: AIDifficulty;       // mode === 'single' 时必填
+  aiDifficulty?: AIDifficulty;
   seed: number;
 }
 
@@ -284,17 +319,53 @@ export interface ScorePatch {
   serveNumber?: 1 | 2;
 }
 
+export interface SpawnIncomingBallOptions {
+  targetX: number;                   // 规范世界坐标 X（客户端钩子负责按 yourSide 镜像后传入）
+  targetZ: number;                   // 规范世界坐标 Z
+  speedXZ?: number;                  // 默认 21 m/s
+  forPlayerIndex?: PlayerIndex;      // 默认 0
+}
+
 export type TestCommandPayload =
   | { cmd: 'set_seed'; args: { seed: number } }
   | { cmd: 'set_score'; args: ScorePatch }
-  | { cmd: 'set_takeover'; args: { playerIndex: PlayerIndex; value: number } }
   | { cmd: 'trigger_hawkeye'; args: { inBounds: boolean; distCm: number; line?: 'sideline' | 'baseline' } }
+  | { cmd: 'spawn_incoming_ball'; args: SpawnIncomingBallOptions }
   | { cmd: 'fast_forward_pause'; args: { seconds: number } };
+
+export interface InputDiagnostics {
+  attached: boolean;
+  pressedCount: number;
+  rebindCount: number;
+  lastResetReason: string | null;
+}
+
+export interface TestStateSnapshot {
+  mode: 'lobby' | 'single' | 'online';
+  yourSide: PlayerSide;
+  roomCode: string | null;
+  wsConnected: boolean;
+  reconnectCount: number;
+  rttMs: number;
+  matchState: MatchState | null;            // 本地视角状态深拷贝
+  avatarLoaded: boolean;
+  avatarSource: 'glb' | 'fallback';
+  avatarTriangles: number;
+  qualityTier: 'HIGH' | 'MEDIUM' | 'LOW';
+  activeDpr: number;
+  estHz: number;
+  fpsCapEnabled: boolean;
+  upgradeCount: number;                     // 恒满足 <= 1
+  fps: number;
+  maxFrameMs: number;
+  drawCalls: number;
+  inputDiagnostics: InputDiagnostics;
+}
 ```
 
 ### 2.3 游戏事件联合类型（`GameEvent`）
 
-> 所有带坐标字段（`pos`、`hawkeye.bouncePos`）在服务端产出与传输时均为**规范世界坐标**；客户端渲染或定位音效前必须通过 `toLocalEvent(event, yourSide)` 转换。
+> 所有坐标字段均为**规范世界坐标**；客户端渲染或定位音效前必须调用 `toLocalEvent(event, yourSide)`。
 
 ```ts
 export type GameEvent =
@@ -304,215 +375,169 @@ export type GameEvent =
   | { type: 'HAWKEYE_START'; hawkeye: HawkeyeState }
   | { type: 'HAWKEYE_END'; isIn: boolean }
   | { type: 'POINT_SCORED'; winner: PlayerIndex; reason: 'ace' | 'winner' | 'unforced_error' | 'double_fault' | 'out' | 'net' | 'double_bounce'; score: ScoreState }
-  | { type: 'TAKEOVER_ON'; player: PlayerIndex }
-  | { type: 'TAKEOVER_OFF'; player: PlayerIndex }
   | { type: 'PAUSE_TIMEOUT_RESUMING'; resumeCountdownSec: number }
   | { type: 'PAUSE_RESUMED'; serverTick: number }
   | { type: 'MATCH_OVER'; winner: PlayerIndex; reason: 'normal' | 'forfeit'; forfeitedBy?: PlayerIndex; score: ScoreState; stats: [PlayerMatchStats, PlayerMatchStats] };
 ```
 
-### 2.4 纯函数与确定性接口契约
+### 2.4 纯函数与确定性接口契约（均由 `shared/src/index.ts` 导出）
 
 | 函数签名 | 行为、不变量与边界规则 |
 | --- | --- |
-| `createRng(seed: number): PRNG` | 确定性 Mulberry32 PRNG，不依赖 `Math.random()` |
-| `netHeightAt(x: number): number` | 返回 `0.914 + (1.07 - 0.914) * Math.min(1, Math.abs(x) / 4.57)` |
-| `createMatchState(config: MatchConfig): MatchState` | 返回初始 `MatchState`（`phase: 'serve_ready'`、`manualPausesLeft: [3, 3]`、`disconnected: [false, false]`、`lastAckSeq: [0, 0]`，发球方立于 Deuce 区底线） |
-| `stepMatch(state: MatchState, inputs: [PlayerInputFrame, PlayerInputFrame], dt: number, rng: PRNG): { state: MatchState; events: GameEvent[] }` | ① **不修改入参**，返回深克隆新状态与本步 `events`；② **单点推进全部计时器**：含 `paused_manual` 的 60s 倒计时（仅 `mode === 'online'`，到 0 自动进 `resuming` 并触发 `PAUSE_TIMEOUT_RESUMING`）、`paused_disconnect` 的双方独立 15s 计时（到 0 触发 `MATCH_OVER(reason:'forfeit')`）、`resuming` 的 3s 倒计时（到 0 恢复 `pausedFromPhase` 并触发 `PAUSE_RESUMED`）；③ **`W+K` 与深浅瞄准的 `side` 符号归一**：计算 `forwardAimZ = -input.aimZ * player.side`（P0/P1 按屏幕 `W` 均得 `forwardAimZ = +1`，按 `S` 均得 `-1`）；在 `rally` 阶段，当 `action === 'K'` 且 `forwardAimZ >= 0.5` 时判定为 **贴网放小球（`dropshot`）**，否则为常规切削（`slice`）；`serve_ready` 阶段按下 `L` 键静默忽略 |
-| `solveBallisticShot(params: BallisticSolveParams): BallisticSolveResult` | 经 3 次迭代补偿空气阻力与 Magnus 偏移，返回精确初速度 `vel` 与 `predictedLanding` |
-| `computeShotQuality(progress: number, archetype: ArchetypeConfig, ctx: { shotType: ShotType; isTakeover: boolean; isSliding: boolean }): { quality: ShotQuality; effectiveHalfWidth: number; error: number }` | **优先级边界**：若 `progress >= 1.18`，**无条件优先返回 `VERY_LATE`**（避免高 `TIM` + Takeover + 二发/切削时 `p_sweet + 4 * W_eff > 1.18` 漏判）；其余按 `SPEC.md` §3.6 计算 |
-| `computeAIInput(state: MatchState, playerIndex: PlayerIndex, difficulty: AIDifficulty, rng: PRNG): PlayerInputFrame` | 确定性纯函数，基于 `state.tick - state.ball.hitTick` 计算反应延迟（`240 / 140 / 70 ms`），输出规范世界坐标输入帧 |
-| `requestManualPause(state: MatchState, by: PlayerIndex): { ok: true; state: MatchState } \| { ok: false; code: ErrorCode; message: string }` | 仅允许在 `serve_ready / serve_toss / rally` 调用（其他阶段返回 `INVALID_PHASE`）；`mode === 'online'` 时检查 `manualPausesLeft[by] > 0`（为 0 返回 `PAUSE_LIMIT_REACHED`），扣减 1 次并设 `remainingSec = 60`；`mode === 'single'` 时**豁免次数与 60s 限制**（不扣次数、`remainingSec = 0` 表示无倒计时） |
-| `requestManualResume(state: MatchState, by: PlayerIndex): { ok: true; state: MatchState; alreadyResuming?: boolean } \| { ok: false; code: ErrorCode; message: string }` | `phase === 'paused_disconnect'` 返回 `CANNOT_RESUME_DISCONNECT`；`phase === 'resuming'` 返回 `{ ok: true, state, alreadyResuming: true }`（幂等忽略且**不重置 3s 倒计时**）；`phase === 'paused_manual'` 时：`mode === 'online'` 转 `resuming`（`resumeCountdownSec = 3`），`mode === 'single'` 直接恢复至 `pausedFromPhase` |
-| `applyDisconnect(state: MatchState, idx: PlayerIndex): MatchState` | 仅在 `serve_ready / serve_toss / rally / paused_manual / resuming` 时转 `paused_disconnect`：**保留最初的 `pausedFromPhase`（绝不覆写为 `paused_manual` 或 `resuming`）**，不退还已扣手动暂停次数，置 `disconnected[idx] = true`、`disconnectRemainingSec[idx] = 15`；在 `waiting / match_over` 调用仅更新 `disconnected[idx]` 不切换 `phase` |
-| `applyReconnect(state: MatchState, idx: PlayerIndex): { state: MatchState; bothConnected: boolean }` | 重置 `lastAckSeq[idx] = 0`、`disconnected[idx] = false`、`disconnectRemainingSec[idx] = 15`；若 `phase === 'paused_disconnect'` 且 `bothConnected === true`，转 `resuming`（`resumeCountdownSec = 3`） |
-| `applyScorePatch(state: MatchState, patch: ScorePatch): MatchState` | 受控测试专用纯函数：按 `ScorePatch` 更新比分并重算 `isDecidingPoint / courtSide / keyPointLabel` 与发球站位 |
-| `launchHawkeyeTestBall(state: MatchState, opts: { inBounds: boolean; distCm: number; line?: 'sideline' | 'baseline' }, rng: PRNG): MatchState` | 受控测试专用纯函数：**通过 `solveBallisticShot` 真实发射一记飞向目标线 `±distCm` 处的物理球**进入 `rally` 飞行，经真实 `stepMatch` 落点与 `d_line <= 15 cm` 阈值判定（**严禁直接篡改 `hawkeye.active = true` 绕过阈值判定**） |
-| `fastForwardPauseState(state: MatchState, seconds: number): MatchState` | 受控测试专用纯函数：按 `seconds` 推进当前 `paused_manual` 或 `paused_disconnect` 计时器（最小夹至 `0.05` 或直接触发到期转移），便于快速验证 60s 自动恢复与 15s 弃权 |
-| `toLocalVec3(v: Vec3, side: PlayerSide): Vec3` | `side === 1 ? { ...v } : { x: -v.x, y: v.y, z: -v.z }` |
-| `toLocalView(state: MatchState, side: PlayerSide): MatchState` | `side === 1` 返回副本；`side === -1` 对所有空间向量绕 Y 轴旋转 `180°`：含 `players[i].pos/vel/yaw(+π)`、`ball.pos/vel/spin/predictedLanding/firstBouncePos` 与 `hawkeye.bouncePos` |
-| `toLocalEvent(event: GameEvent, side: PlayerSide): GameEvent` | `side === 1` 返回副本；`side === -1` 使用 `toLocalVec3` 镜像转换 `SHOT_HIT.pos`、`BOUNCE.pos`、`NET_LET.pos`、`HAWKEYE_START.hawkeye.bouncePos` |
-| `toWorldInput(localInput: PlayerInputFrame, side: PlayerSide): PlayerInputFrame` | 返回新对象，`moveX / moveZ / aimX / aimZ` 乘以 `side` |
-| `generateRoomCode(rng: PRNG): string` | 从 32 字符集 `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`（排除 `0/O/1/I`）生成 4 位房间码 |
-| `computeStatsSummary(stats: PlayerMatchStats): { firstServePct: number; perfectPct: number }` | 分母为 `0` 返回 `0`，否则四舍五入返回 `0–100` 整数百分比 |
+| `createRng(seed: number): PRNG` | 确定性 Mulberry32 PRNG，禁止 `Math.random()` |
+| `cloneMatchState(state: MatchState): MatchState` | 深拷贝完整 `MatchState`，含 `players[0/1].stance`、`ball`、`score`、`stats`、`hawkeye`、`pause`、`lastAckSeq` |
+| `netHeightAt(x: number): number` | `0.914 + (1.07 - 0.914) * Math.min(1, Math.abs(x) / 4.57)` |
+| `computePlayerMaxSpeed(speedRating: number): number` | `5.4 + (speedRating - 60) * 0.048` |
+| `computePowerMultiplier(powerRating: number): number` | `1.0 + (powerRating - 80) * 0.008` |
+| `computeSpinMultiplier(spinRating: number): number` | `1.0 + (spinRating - 80) * 0.010` |
+| `computeNetAccuracyMultiplier(netRating: number): number` | `1.0 + (netRating - 75) * 0.012` |
+| `computeComfortRadius(controlRating: number): number` | `1.05 + (controlRating - 75) * 0.008` |
+| `computeControlScatterM(quality: ShotQuality, controlRating: number): number` | `CLEAN`: `0.03`；`SOLID`: `Math.max(0.14, 0.28 - (CTL - 75) * 0.006)`；`STRETCH`: `Math.max(0.38, 0.68 - (CTL - 75) * 0.012)` |
+| `computeStretchSidelineErrorProb(controlRating: number): number` | `clamp(0.14 - (CTL - 75) * 0.004, 0.04, 0.22)` |
+| `computeFirstServeCornerFaultProb(controlRating: number): number` | `clamp(0.10 - (CTL - 75) * 0.003, 0.03, 0.16)` |
+| `computePositionShotQuality(contactDistM: number, archetype: ArchetypeConfig, isSliding: boolean): { quality: ShotQuality; comfortRadiusM: number }` | `isSliding \|\| contactDistM > 1.48` → `'STRETCH'`；else `contactDistM <= R_sweet` → `'CLEAN'`；else `'SOLID'` |
+| `createMatchState(config: MatchConfig): MatchState` | 初始化 `phase: 'serve_ready'`、`manualPausesLeft: [3, 3]`、`lastAckSeq: [0, 0]`、`stance.lastConsumedHitTick = -1`、`stance.lockedAimX = 0`、`score.keyPointLabel`（超级抢十初始 `'SUPER_TIEBREAK'`） |
+| `stepMatch(state, inputs, dt, rng)` | 不修改入参，推进物理/计时器/自动触球状态机。严格遵守：① **铁律**：`stance.armedAction === 'none'` 绝不挥拍；② **防同帧与隔网触球**：仅在 `ball.hitTick < next.tick`、`ball.pos.z * p.side >= -0.05` 且 `ball.vel.z * p.side > 0` 时允许触球；③ **短按缓冲/长按取消**：`holdDurationSec < 0.20` 松手进 `0.35s` 缓冲，`>= 0.20` 松手立刻清零；④ **一键发球边沿与锁存**：`serve_ready → serve_toss` 严格要求 `input.actionPressed && (input.action === 'J' \|\| input.action === 'K')`（`L` 静默忽略），进入后 `serve_toss` 期间松开 `J`/`K` 不取消、`lockedAimX` 仅在 `Math.abs(input.aimX) > 0.05` 时更新、`0.32 s` 自动出球；正常发球判 `CLEAN`、极边角失误 `serve_flat` 判 `SOLID`，均计 `totalShots += 1`（`CLEAN` 计 `cleanShots += 1`），`NET_LET` 按 `lastShotQuality === 'CLEAN'` 与 `serveNumber === 1` 精确回滚；⑤ **`K` 默认放小球 & `STRETCH` 钳位**：`forwardAimZ = -aimZ * side`，`K` 且 `forwardAimZ <= -0.5`（`S+K`）判 `slice`，其余 `K`（含 `W+K`）判 `dropshot`；`STRETCH` 的 `-1.1 m` 浅缩仅作用于 `topspin`/`slice`/`lob`（钳位 `\|Z\| >= 2.2`），对 `dropshot` 改为 `+0.35 m` 变深并钳位最终 `\|Z\| ∈ [2.0, 3.8]` |
+| `solveBallisticShot(params): BallisticSolveResult` | 3 次迭代阻力+Magnus 补偿解算器 |
+| `computeAIInput(state, playerIndex, difficulty, rng): PlayerInputFrame` | 确定性纯函数，输出规范世界坐标 V2 `PlayerInputFrame`（发球触发 tick 与新武装 tick 正确置 `actionPressed: true`），走与玩家完全相同的自动触球逻辑 |
+| `requestManualPause` / `requestManualResume` / `applyDisconnect` / `applyReconnect` / `fastForwardPauseState` | 与 V1 状态机不变量完全一致（`pausedFromPhase` 保护、双断线独立计时、重连重置 `lastAckSeq[idx] = 0`） |
+| `applyScorePatch(state, patch): MatchState` | 更新比分、发球站位，重置双方 `stance` |
+| `launchHawkeyeTestBall(state, opts, rng): MatchState` | 经 `solveBallisticShot` 真实发射压线球走真实 `stepMatch` 判定 |
+| `spawnIncomingTestBall(state, opts, rng): MatchState` | 经 `solveBallisticShot` 从发球方底线向 `(opts.targetX, opts.targetZ)` 发射真实物理来球，强制置 `phase = 'rally'`、`phaseTimer = 0`、`ball.active = true`、`ball.bounces = 0`、`ball.touchedNet = false`、`ball.lastHitter = 1 - receiverIdx`、`ball.lastShotType = 'topspin'`、`ball.lastShotQuality = 'CLEAN'`、`ball.hitTick = next.tick`、`ball.firstBouncePos = null`、`ball.firstBounceInBounds = null`，重置接球方 `stance`（`armedAction = 'none'`、`lastConsumedHitTick = -1`）并移开发球方 |
+| `toLocalVec3` / `toLocalView` / `toLocalEvent` / `toWorldInput` | `side === -1` 时 180° 镜像所有空间向量与 `players[i].stance.lockedAimX`；`toWorldInput` 将 `moveX/moveZ/aimX/aimZ` 乘以 `side` 并原样透传 `action` 与 `actionPressed` |
+| `generateRoomCode(rng): string` | 32 字符无歧义 4 位房间码 |
+| `computeStatsSummary(stats: PlayerMatchStats): { firstServePct: number; cleanPct: number }` | 分母为 `0` 返回 `0`，否则四舍五入 `0–100` 整数百分比 |
 
 ---
 
 ## 三、Client ↔ Server WebSocket 协议契约
 
-### 3.1 连接端点、代理环境变量、健康检查与空闲回收
-- **客户端 WS 地址推导**：
-  - 规范化 `import.meta.env.BASE_URL` 确保首尾带 `/`（如 `/` 或 `/tennis/`），连接 `${wsProto}//${window.location.host}${base}ws`；
-  - Vite dev 代理目标通过环境变量 `VITE_WS_PROXY_TARGET` 注入（默认 `http://127.0.0.1:3301`），将 `<base>ws`（WS）与 `<base>health`（HTTP）转发至服务端，防止 Reviewer/Tester 多端口实例串台。
-- **服务端监听**：通过 `PORT`（默认 `3301`）、`WS_PATH`（默认 `/ws`，同时兼容任意前缀路径末尾 `/ws`）与 `ENABLE_TEST_HOOKS`（默认未开启；仅 `=== '1'` 时受理 `TEST_COMMAND`）控制；暴露 `GET /health`（及任意后缀 `/health`）返回：
-  ```json
-  { "status": "ok", "rooms": 2, "uptimeSec": 145, "rssMb": 64.2 }
-  ```
-- **空闲房间回收策略**：
-  - 双方均断连的空房（`waiting` 或 `match_over`）超过 `60 s` 自动回收；
-  - 处于 `waiting` 或 `match_over` 且连续 `600 s`（10 分钟）无任何消息的房间自动关闭并回收，保障 `AC-15` 长期运行内存稳定（RSS `≤ 256 MB`）。
-- **防洪限流**：`PLAYER_INPUT` 客户端按 60Hz 发送；单连接超过 `120 msg/s` 持续 1 秒时丢弃超额帧并返回 `ERROR(RATE_LIMITED)`。
+### 3.1 连接、子路径、健康检查与空闲回收（保持 V1 规范）
+- 客户端 WS 地址：规范化 `import.meta.env.BASE_URL`（首尾带 `/`），连接 `${wsProto}//${window.location.host}${base}ws`；Vite 代理 `VITE_WS_PROXY_TARGET`（默认 `http://127.0.0.1:3301`）。
+- 服务端：`PORT`（默认 `3301`）、`WS_PATH`（默认 `/ws`，兼容任意前缀后缀 `/ws`）、`ENABLE_TEST_HOOKS`（仅 `'1'` 受理 `TEST_COMMAND`）；`GET /health` 返回 `{ status, rooms, uptimeSec, rssMb }`。
+- 空闲回收：双断连空房 `60 s` 回收；`waiting`/`match_over` 无消息 `600 s` 回收；超 `120 msg/s` 持续 1s 返回 `ERROR(RATE_LIMITED)`。
 
-### 3.2 Client → Server 消息联合类型（`ClientMessage`，由 `@court2k/shared` 导出）
+### 3.2 `ClientMessage` 与 `ServerMessage` 联合类型（由 `@court2k/shared` 导出）
+- **`ClientMessage`** 保留全部 11 种消息，以下两处升级为 V2：
+  1. `PLAYER_INPUT`: `payload: PlayerInputFrame & { clientTime: number }`（V2 `action` + `actionPressed: boolean`，无 `phase`）；
+  2. `TEST_COMMAND`: `payload: TestCommandPayload`（移除 `set_takeover`，新增 `spawn_incoming_ball`）。
+- **`ServerMessage`** 保留全部 15 种消息（`ROOM_CREATED`、`ROOM_JOINED`、`LOBBY_UPDATE`、`MATCH_START`、`STATE_SNAPSHOT`、`GAME_EVENT`、`MATCH_PAUSED`、`MATCH_RESUMING`、`MATCH_RESUMED`、`OPPONENT_DISCONNECTED`、`OPPONENT_RECONNECTED`、`FULL_SYNC`、`REMATCH_STATUS`、`PONG`、`ERROR`），其中 `MatchState` 与 `GameEvent` 为 V2 类型（零 `takeover`/`meter` 字段）。
 
-```ts
-export type ClientMessage =
-  | { type: 'CREATE_ROOM'; payload: { court: CourtId; format: MatchFormat; archetype: ArchetypeId } }
-  | { type: 'JOIN_ROOM'; payload: { roomCode: string; archetype: ArchetypeId } }
-  | { type: 'RECONNECT'; payload: { roomCode: string; sessionToken: string } }
-  | { type: 'SELECT_LOADOUT'; payload: { archetype: ArchetypeId; court?: CourtId; format?: MatchFormat } }
-  | { type: 'READY'; payload: { ready?: boolean } } // 省略默认 true；支持取消就绪
-  | { type: 'PLAYER_INPUT'; payload: PlayerInputFrame & { clientTime: number } } // 本地视角意图
-  | { type: 'PAUSE_REQUEST'; payload: Record<string, never> }
-  | { type: 'RESUME_REQUEST'; payload: Record<string, never> }
-  | { type: 'REMATCH_REQUEST'; payload: Record<string, never> }
-  | { type: 'PING'; payload: { clientTime: number } }
-  | { type: 'TEST_COMMAND'; payload: TestCommandPayload };
-```
-
-- **大厅 `SELECT_LOADOUT` 与 `READY` 联动规则**：房主（P0）修改 `court` 或 `format` 时，服务端自动重置双方 `ready = [false, false]` 并广播 `LOBBY_UPDATE`；客场（P1）仅可修改自身 `archetype`（忽略其 `court`/`format` 字段）。
-- **输入序号复位与单调不变量（防刷新重连按键失灵）**：
-  - 常规对战期间，服务端丢弃 `seq <= state.lastAckSeq[idx]` 的乱序/重复帧；
-  - 服务端在 **`RECONNECT` 成功时必须重置 `lastAckSeq[reconnectedIndex] = 0`**，在 **`MATCH_START`（含 Rematch）时重置 `lastAckSeq = [0, 0]` 与 `serverTick = 0`**；
-  - 客户端在收到 **`FULL_SYNC` 或 `MATCH_START` 时必须同步**：① 清空本地快照插值队列并以新 `snapshot` 为首帧；② 将本地发送序号重置为 `0`（下一帧发送 `seq = 1`）；③ 调用 `InputController.resetAndRebind()`。
-
-### 3.3 Server → Client 消息联合类型（`ServerMessage`，由 `@court2k/shared` 导出）
-
-> **坐标系铁律**：`MATCH_START.snapshot`、`STATE_SNAPSHOT.state`、`FULL_SYNC.snapshot` 以及 `GAME_EVENT.event` 中的全部坐标均为**规范世界坐标**；客户端渲染与空间音效前必须调用 `toLocalView(state, yourSide)` / `toLocalEvent(event, yourSide)`。
-
-```ts
-export type ServerMessage =
-  | { type: 'ROOM_CREATED'; payload: { roomCode: string; sessionToken: string; yourSide: 1; playerIndex: 0; matchConfig: MatchConfig } }
-  | { type: 'ROOM_JOINED'; payload: { roomCode: string; sessionToken: string; yourSide: -1; playerIndex: 1; matchConfig: MatchConfig; ready: [boolean, boolean] } }
-  | { type: 'LOBBY_UPDATE'; payload: { roomCode: string; matchConfig: MatchConfig; connected: [boolean, boolean]; ready: [boolean, boolean] } }
-  | { type: 'MATCH_START'; payload: { serverTick: 0; yourSide: PlayerSide; playerIndex: PlayerIndex; snapshot: MatchState } }
-  | { type: 'STATE_SNAPSHOT'; payload: { serverTick: number; serverTime: number; state: MatchState } } // 对战期 30Hz；暂停/恢复倒计时期间 5Hz + 变更瞬时推送
-  | { type: 'GAME_EVENT'; payload: { serverTick: number; event: GameEvent } }
-  | { type: 'MATCH_PAUSED'; payload: { reason: 'manual' | 'disconnect'; initiatedBy: PlayerIndex; remainingSec: number; manualPausesLeft: [number, number] } }
-  | { type: 'MATCH_RESUMING'; payload: { resumeCountdownSec: number; initiatedBy: PlayerIndex | 'timeout' | 'reconnect' } }
-  | { type: 'MATCH_RESUMED'; payload: { serverTick: number; requireInputReset: true } }
-  | { type: 'OPPONENT_DISCONNECTED'; payload: { graceSeconds: 15; disconnectedIndex: PlayerIndex } }
-  | { type: 'OPPONENT_RECONNECTED'; payload: { resumeInSeconds: 3; reconnectedIndex: PlayerIndex } }
-  | { type: 'FULL_SYNC'; payload: { roomCode: string; yourSide: PlayerSide; playerIndex: PlayerIndex; snapshot: MatchState; requireInputReset: true } }
-  | { type: 'REMATCH_STATUS'; payload: { requested: [boolean, boolean] } }
-  | { type: 'PONG'; payload: { clientTime: number; serverTick: number } }
-  | { type: 'ERROR'; payload: { code: ErrorCode; message: string } };
-```
-
-### 3.4 暂停 / 断线 / 恢复 / 弃权 / Rematch 边界状态机与唯一消息序列
-
-| 场景 / 竞态 | 服务端确定性转移规则 | 唯一精确下发 WS 消息序列 |
-| --- | --- | --- |
-| **正常手动暂停** | 仅 `serve_ready / serve_toss / rally` 且 `manualPausesLeft[i] > 0`；扣减 1 次，保存 `pausedFromPhase`，`remainingSec = 60` | `S→All MATCH_PAUSED(reason:'manual')` + 即时 `STATE_SNAPSHOT` |
-| **双方同时 `PAUSE_REQUEST`** | 按事件循环串行处理：先到者成功转 `paused_manual` 扣次数；后到者见 `paused_manual` 拒收且**不扣次数** | 先到者触发上行序列；后到者单播 `ERROR(INVALID_PHASE)` |
-| **手动暂停额度归零** | `manualPausesLeft[i] <= 0` 拒收 | 单播 `ERROR(PAUSE_LIMIT_REACHED)` |
-| **手动恢复 / 60s 自动到期** | `paused_manual → resuming`（`resumeCountdownSec = 3`）；3s 归零后恢复 `pausedFromPhase` | 发起时 `S→All MATCH_RESUMING(initiatedBy: idx \| 'timeout')` → 3s 后 `S→All MATCH_RESUMED(requireInputReset:true)` + `STATE_SNAPSHOT` |
-| **双方同时 `RESUME_REQUEST`** | 先到者转 `resuming`；后到者见 `resuming` **幂等忽略，严禁重置 3s 倒计时** | 仅先到者触发一次 `MATCH_RESUMING` |
-| **对战 / 手动暂停 / `resuming` 期间发生断线** | 调用 `applyDisconnect` 转 `paused_disconnect`，**保留原始 `pausedFromPhase`**（绝不覆写），手动暂停被断线接管且不退还次数，`disconnectRemainingSec[i] = 15` | `S→Online MATCH_PAUSED(reason:'disconnect')` + `S→Online OPPONENT_DISCONNECTED` + `STATE_SNAPSHOT` |
-| **断线暂停期请求手动恢复** | `phase === 'paused_disconnect'` 禁止手动恢复 | 单播 `ERROR(CANNOT_RESUME_DISCONNECT)` |
-| **双方相继断线（双断线）** | 各自独立倒计时 `disconnectRemainingSec[0/1]`；仅 1 人重连时**留在 `paused_disconnect`** 不触发 `resuming`，直至双方均在线 | 先重连方单播 `FULL_SYNC`；第二人重连后再广播 `OPPONENT_RECONNECTED` + `MATCH_RESUMING(initiatedBy:'reconnect')` → 3s 后 `MATCH_RESUMED` |
-| **单方 15s 内重连成功** | `applyReconnect` 重置 `lastAckSeq[i] = 0`，双方均在线 → 转 `resuming(3s)` | `S→Reconnected FULL_SYNC(requireInputReset:true)` → `S→All OPPONENT_RECONNECTED` + `S→All MATCH_RESUMING` → 3s 后 `S→All MATCH_RESUMED(requireInputReset:true)` |
-| **断线超时 15s 弃权** | `disconnectRemainingSec[i] <= 0` → `phase = 'match_over'`，`winner = 1 - i`（若双方同 tick 归零则直接回收房间） | **唯一结算事件**：`S→All GAME_EVENT(MATCH_OVER, reason:'forfeit', forfeitedBy:i)`（**不再发 `ERROR`**，彻底杜绝双弹窗） |
-| **`waiting` / `match_over` 阶段断线** | 绝不进入 `paused_disconnect` 或弃权：`waiting` 置 `ready[i]=false`、`connected[i]=false`（客场离房立刻释放席位）；`match_over` 置 `rematchRequested[i]=false` | `waiting` 广播 `LOBBY_UPDATE`；`match_over` 广播 `REMATCH_STATUS` |
-| **赛后 `REMATCH_REQUEST`（含重复点击）** | 重复点击幂等忽略；单方点击更新 `requested`；双方均 `true` 后重置比分/统计/Takeover/`manualPausesLeft=[3,3]`/`lastAckSeq=[0,0]`/`serverTick=0` 开新局 | 单方点击：`S→All REMATCH_STATUS`；双方就绪：`S→All MATCH_START(serverTick:0)` |
-
-### 3.5 统一错误码表（`ErrorCode`）
-
-| 错误码 | 触发条件 | 客户端处理要求 |
-| --- | --- | --- |
-| `INVALID_MESSAGE` | JSON 解析失败或字段非法 | 控制台警告，不崩溃 |
-| `ROOM_NOT_FOUND` | 4 位码不存在或已回收 | 大厅 Toast 提示“房间不存在” |
-| `ROOM_FULL` | 房间已满 2 人 | 大厅 Toast 提示“房间已满” |
-| `INVALID_TOKEN` | `RECONNECT` token 不匹配或房间已回收 | 清除 `sessionStorage` 残留 token 并回大厅提示 |
-| `MATCH_ALREADY_STARTED` | 试图加入已开赛房间 | 大厅提示“比赛已开始” |
-| `INVALID_PHASE` | 当前阶段不允许该操作（如鹰眼期/已暂停期重复请求暂停） | 轻量 Toast 提示，保持原状态 |
-| `PAUSE_LIMIT_REACHED` | 发起方 `manualPausesLeft[idx] <= 0` | HUD 提示“本场暂停次数（3次）已用尽” |
-| `CANNOT_RESUME_DISCONNECT` | 断线暂停期尝试手动恢复 | HUD 提示“等待对手重连中，无法提前恢复” |
-| `RATE_LIMITED` | 单连接超频 | 静默丢弃并节流 |
-| `FORBIDDEN_TEST_HOOK` | 服务端未设 `ENABLE_TEST_HOOKS=1` 收到 `TEST_COMMAND` | 拒绝执行并记日志 |
+### 3.3 服务端 60Hz `PLAYER_INPUT` 消费与 `TEST_COMMAND` 校验铁律（WP3 必守）
+1. **`PLAYER_INPUT` 校验**：`server/src/validation.ts` 必须强校验 `action ∈ {'none','J','K','L'}` 与 `typeof payload.actionPressed === 'boolean'`，拒绝 V1 旧格式或非法字段。
+2. **`spawn_incoming_ball` 校验与执行**：
+   - `validation.ts` 强校验：`targetX` 为有限数且夹至 `[-8, 8]`、`targetZ` 为有限数且夹至 `[-16, 16]`、可选 `speedXZ` 必须为有限数且 `> 0 && <= 50`、可选 `forPlayerIndex` 必须为 `0 | 1`；
+   - `room.ts` 收到并校验通过后，调用 `spawnIncomingTestBall(this.state, payload.args, this.rng)`，调用 `this.clearInputs()` 清空残留输入队列，并立即广播 `STATE_SNAPSHOT`。
+3. **队列防丢边沿**：当 `inputQueues[idx].length >= 8` 时，优先丢弃首个 `actionPressed === false` 的旧帧，仅当队列全为边沿帧时才丢弃队首，确保快速短按 `J`/`K`/`L` 在网络抖动下不丢失。
+4. **空队列复用清边沿**：`consumeTickInput(idx)` 在队列为空复用 `lastInputs[idx]` 时，**必须返回 `{ ...prev, actionPressed: false }`**（保留持续按住的 `action` 与 `moveX/moveZ/aimX/aimZ`，绝不把单次按下边沿重复多 tick）。
+5. **序号与缓冲复位**：`RECONNECT` 成功重置 `lastAckSeq[idx] = 0`；`MATCH_START`（含 Rematch）重置 `lastAckSeq = [0, 0]`、`serverTick = 0`；客户端收到 `FULL_SYNC`/`MATCH_START` 清空 `SnapshotBuffer`、重置本地 `seq = 0` 并调用 `InputController.resetAndRebind()`。
+6. **`waiting` 阶段刷新重连不变量**：客户端收到 `FULL_SYNC` 时，若 `payload.snapshot.phase === 'waiting'`，保持 `mode = 'lobby'` 与大厅界面可见，仅同步 `roomCode`/`yourSide`/`playerIndex`/`onlineConfig`，不误切比赛 HUD。
 
 ---
 
-## 四、客户端内部接口与受控测试快照契约（WP2 必守）
+## 四、Blender 5.2 风格化 `.glb` 资产契约（WP-Asset ↔ WP2 锁定）
 
-### 4.1 角色渲染与输入自愈接口
+### 4.1 资产路径与生成复现命令
+- **源脚本**：`tennis-2k/assets/source/generate_player_avatar.py`（同时支持**无参默认运行**导出至 `tennis-2k/client/public/assets/models/tennis_player.glb` 与 `-- --output <path>` 指定路径覆盖）
+- **资产清单**：`tennis-2k/assets/source/README.md`
+- **导出目标**：`tennis-2k/client/public/assets/models/tennis_player.glb`
+- **无头复现命令**：
+  ```powershell
+  # 默认路径一键导出
+  & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python tennis-2k/assets/source/generate_player_avatar.py
+  # 或显式指定输出路径
+  & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python tennis-2k/assets/source/generate_player_avatar.py -- --output tennis-2k/client/public/assets/models/tennis_player.glb
+  ```
+- **前端加载路径**：`${normalizeBase(import.meta.env.BASE_URL)}assets/models/tennis_player.glb`（兼容 `/` 与 `/tennis/`）。
+
+### 4.2 几何、21 骨层级、独立节点、朝向、材质与动画精确契约（WP2 强依赖，严禁偏差）
+
+| 维度 | 契约精确要求 |
+| --- | --- |
+| **坐标系、朝向与持拍侧** | Blender 建模正面朝 **`+Y`**，使用 `export_yup=True` 导出为 glTF 2.0 标准 Y-up（单位米 `m`）后：**人物正面/鼻尖/遮阳帽檐严格朝 `-Z`**（对齐游戏 `yaw = 0`）、反戴鸭舌帽檐朝 `+Z`、**右手持拍 `Hand_R` / `RacquetSocket` 严格位于 `+X` 侧**、总高 `1.75–1.82 m`、脚底 `|minY| ≤ 0.01 m` |
+| **网格、体量与 Draw Calls** | 一体平滑蒙皮主体 + 合身短袖球衣/短裤/中筒袜/运动鞋/立体发型/简约五官/细化 Y 喉球拍；**`.glb` 原始体积 `≤ 350 KB`**；单角色可见三角面 **`3,500–7,500`**（全文件所有节点总计 `≤ 9,000`）；必须含至少 1 个 `SkinnedMesh`；**单角色 Draw Calls `≤ 18`**（双人 `≤ 36`，全场景 `≤ 150`） |
+| **21 骨 `Armature` 精确父子层级** | `Hips` → `Spine` → `Chest` → (`Neck` → `Head` → `HeadgearSocket`; `Shoulder_L` → `UpperArm_L` → `Forearm_L` → `Hand_L`; `Shoulder_R` → `UpperArm_R` → `Forearm_R` → `Hand_R` → `RacquetSocket`); `Hips` → (`Thigh_L` → `Shin_L` → `Foot_L`; `Thigh_R` → `Shin_R` → `Foot_R`) |
+| **独立命名的可切换场景节点（6 个，严禁合并进主体网格）** | 均须可由 `root.getObjectByName(name)` 检索并独立切换 `.visible`：<br>• `Headgear_Headband`（挂于 `HeadgearSocket`，`power` 显示，材质 `Mat_JerseyAccent`）<br>• `Headgear_Visor`（挂于 `HeadgearSocket`，`serve_volley` 显示，带身 `Mat_JerseyPrimary` / 帽檐 `Mat_JerseyAccent`）<br>• `Headgear_CapBackwards`（挂于 `HeadgearSocket`，`defender` 显示，帽冠 `Mat_JerseyAccent` / 帽檐 `Mat_JerseyPrimary`）<br>• `Wristband_L`（挂于 `Forearm_L`，`power` 与 `allcourt` 显示，材质 `Mat_JerseyAccent`）<br>• `Wristband_R`（挂于 `Forearm_R`，`power` 与 `allcourt` 显示，材质 `Mat_JerseyAccent`）<br>• `Racquet`（挂于 `RacquetSocket`，常显，拍框 `Mat_RacquetFrame` / 球线 `Mat_RacquetStrings` / 可选握把静态材质） |
+| **必需的 10 个换色材质槽 + 允许静态五官材质** | 必须包含以下 10 个精确命名的运行期换色材质：`Mat_JerseyPrimary`、`Mat_JerseyAccent`、`Mat_Shorts`、`Mat_Skin`、`Mat_Hair`、`Mat_Socks`、`Mat_ShoeUpper`、`Mat_ShoeSole`、`Mat_RacquetFrame`、`Mat_RacquetStrings`。<br>**允许额外静态材质**用于五官与细节（如 `Mat_EyeWhite`、`Mat_EyeIris`、`Mat_FaceDetail`、`Mat_RacquetGrip`），WP2 运行期不改其颜色，防止眼球/眉毛/握把随球衣变色 |
+| **8 条嵌入式 NLA 动画 Clip 与防 `scale` 覆写规则** | 精确命名：`idle`（循环）、`run`（循环）、`slide`（单次/循环）、`serve_toss`（`0.35 s`）、`forehand`（`0.36 s`）、`backhand`（`0.36 s`）、`lob`（`0.40 s`）、`celebrate`（循环）。<br>**防覆写铁律**：8 条动画仅可写入骨骼旋转与 `Hips` 位移轨道，**严禁导出任何骨骼的 `scale` 轨道**，确保 WP2 施加于 `Chest` 骨骼的 `shoulderScale` 不被 `AnimationMixer` 覆写 |
+
+---
+
+## 五、客户端内部接口与输入/渲染强契约（WP2 必守）
+
+> 注：`InputDiagnostics` 与 `TestStateSnapshot` 由 **`@court2k/shared` 唯一导出**（定义见 §2.2），`client/src/contracts.ts` 直接从 `@court2k/shared` 导入复用于 `ClientInputController` 与 `Court2KTestHook`，严禁重复定义冲突类型。
 
 ```ts
+import type * as THREE from 'three';
+import type {
+  ArchetypeConfig,
+  InputDiagnostics,
+  PlayerInputFrame,
+  PlayerState,
+  ScorePatch,
+  TestStateSnapshot,
+} from '@court2k/shared';
+
+export interface AvatarStatus {
+  loaded: boolean;
+  source: 'glb' | 'fallback';
+  triangles: number;
+  clipNames: string[];
+}
+
 export interface PlayerAvatarController {
   readonly root: THREE.Group;
   setArchetype(config: ArchetypeConfig): void;
   updatePose(player: PlayerState, dt: number): void;
+  getStatus(): AvatarStatus;
   dispose(): void;
 }
 
-export interface InputDiagnostics {
-  attached: boolean;
-  pressedCount: number;
-  rebindCount: number;
-  lastResetReason: string | null;
-}
-
-export interface InputController {
+export interface ClientInputController {
   attach(): void;
   detach(): void;
-  /** 清空 pressedKeys 与蓄力态、先解绑再重绑 window 监听、blur 焦点元素 */
   resetAndRebind(reason: string): void;
   sampleFrame(seq: number): PlayerInputFrame;
   getDiagnostics(): InputDiagnostics;
 }
 ```
 
-- 必须触发 `resetAndRebind(reason)` 的 6 类时机：① 收到 `FULL_SYNC`（同时重置发送序号与清插值队列）；② 收到 `MATCH_RESUMED`；③ 收到 `HAWKEYE_END`；④ 单机暂停恢复；⑤ `window` `blur` / `visibilitychange(hidden→visible)`；⑥ 页面刷新重挂。
+### 5.1 `ClientInputController.sampleFrame()` 4 条硬性行为契约（与服务端 §3.3 端到端闭环）
+1. **忽略自动连发 `e.repeat === true`**：长按 `J`/`K`/`L` 触发的浏览器 `keydown(repeat=true)` **绝不**产生 `actionPressed = true`，避免在 `stepMatch` 中反复将 `holdDurationSec` 重置为 `dt` 而破坏长按松手取消（`AC-05` ④）。
+2. **单帧内快按锁存**：若 `keydown` 与 `keyup` 在同一 16.6 ms 帧内连续发生（`sampleFrame` 尚未采样），必须锁存 1 帧合成边沿——当帧 `sampleFrame` 返回 `{ action: key, actionPressed: true }`，下一帧恢复 `{ action: 'none', actionPressed: false }`，绝不丢弃快点短按。
+3. **按住期间无缝切换球种**：当前正按住球种键（如 `J`）时按下另一球种键（如 `K`），立即切换 `currentAction = 'K'` 并锁存 `actionPressed = true`；随后松开旧键 `J` 时**绝不清空**当前激活的 `K`；松开当前激活键时若另有已按下球种键则回落至该键（不重发 `actionPressed`），否则归 `'none'`。
+4. **`resetAndRebind(reason)` 完整清空**：必须同时清空 `pressedKeys`、`currentAction = 'none'`、待发 `actionPressed` 锁存与快按锁存，先解绑再重绑 `window`/`document` 监听，并 `blur()` 焦点元素（覆盖全部 6 类触发时机：`FULL_SYNC`、`MATCH_RESUMED`、`HAWKEYE_END`、单机暂停恢复、`blur/focus/visibilitychange`、初始挂载）。
 
-### 4.2 受控测试状态快照类型（`window.__COURT2K_TEST__.getState()`）
-
-```ts
-export interface TestStateSnapshot {
-  mode: 'lobby' | 'single' | 'online';
-  yourSide: PlayerSide;
-  roomCode: string | null;
-  wsConnected: boolean;
-  reconnectCount: number;
-  rttMs: number;
-  matchState: MatchState | null;            // 当前客户端视图对应状态深拷贝
-  qualityTier: 'HIGH' | 'MEDIUM' | 'LOW';
-  activeDpr: number;
-  estHz: number;
-  fpsCapEnabled: boolean;
-  upgradeCount: number;                     // 必须恒满足 <= 1
-  fps: number;
-  maxFrameMs: number;
-  drawCalls: number;
-  inputDiagnostics: InputDiagnostics;
-}
-```
+### 5.2 `GlbPlayerAvatar` 与受控测试钩子约束
+- **`GlbPlayerAvatar`**：通过 `GLTFLoader` 加载并缓存单一 `.glb`，双角色各自 `SkeletonUtils.clone()` 并深克隆 10 个换色材质实例；按 `config.shoulderScale` 设置 `Chest` 骨骼缩放（`x = shoulderScale, y = 1, z = config.id === 'defender' ? 0.94 : 1.0`）；按 `headgear` 切换 `Headgear_*` 与 `Wristband_L/R` 可见性；严禁静默回退（加载失败时 `getStatus()` 必须返回 `{ loaded: false, source: 'fallback' }` 并 `console.error`）。
+- **地面预选球种环**：当 `player.stance.armedAction !== 'none'` 且处于 `rally` 时，在本地玩家脚下渲染对应颜色的柔和地面环（`J` `#f59e0b`、`K` `#06b6d4`、`L` `#a855f7`），并对上半身叠加柔和引拍蓄势转向；未武装时立即隐藏。
+- **`spawnIncomingBall` 测试钩子坐标系**：`window.__COURT2K_TEST__.spawnIncomingBall(opts)` 接收**当前客户端本地视图坐标**（`targetZ > 0` 永远指向己方近端半场），`GameApp` 乘以 `this.yourSide` 转为规范世界坐标后传入引擎或发往 `TEST_COMMAND(spawn_incoming_ball)`，默认 `forPlayerIndex = this.playerIndex`。
 
 ---
 
-## 五、工作包严格边界、npm Workspaces 隔离与端口分配
+## 六、工作包严格边界、端口分配与并行纪律
 
-| 工作包 | 独占写目录与显式豁免 | 依赖基点 | Builder 端口 | Reviewer 端口 | Tester 端口 / 会话 |
+| 工作包 | 独占写目录与报告目录 | 依赖基点 | Builder 端口 | Reviewer 端口 | Tester 端口 / 会话 |
 | --- | --- | --- | --- | --- | --- |
-| **契约评审** | 只读 `docs/SPEC.md`、`docs/CONTRACT.md`；评审报告 `docs/review/contract/**` | 无 | 不适用 | `4900–4999` | 不适用 |
-| **WP1 (`shared`)** | `tennis-2k/package.json`、`tsconfig.base.json`、`.gitignore`、`shared/**`、**占位骨架 `client/package.json` & `server/package.json`（仅 name/private/type 占位，零源码）**；豁免报告 `docs/review/wp1/**` | 契约 PASS | `3100–3199` | `4100–4199` | 不适用（脚本闭环） |
-| **WP2 (`client`)** | `tennis-2k/client/**`（只读 `@court2k/shared`）；豁免报告 `docs/review/wp2/**` | WP1 合入基点 | `3200–3299`（Vite `3201`） | `4200–4299`（`4201`） | `4510–4519`（独立会话） |
-| **WP3 (`server`)** | `tennis-2k/server/**`（只读 `@court2k/shared`）；豁免报告 `docs/review/wp3/**` | WP1 合入基点 | `3300–3399`（WS `3301`） | `4300–4399`（`4301`） | 不适用（脚本闭环） |
-| **整合与整体评审** | 整合分支 `integration/v1`（含统一生成 `package-lock.json` 与联调脚本）；报告 `docs/review/integration/**` | WP1+WP2+WP3 全 PASS | `3100–3199` | `4900–4999`（前 `4901`/后 `4902`） | `4520–4529`（双独立 Context） |
+| **契约评审** | 只读 `docs/SPEC.md`、`CONTRACT.md`；报告 `docs/review/contract/**` | 用户批准开工 | 不适用 | `4900–4999` | 不适用 |
+| **WP1 (`shared`)** | `tennis-2k/shared/**`；报告 `docs/review/wp1/**` | 契约 PASS | `3100–3199` | `4100–4199` | 不适用（脚本闭环） |
+| **WP-Asset (`assets`)** | `tennis-2k/assets/**`、`tennis-2k/client/public/assets/models/**`；报告 `docs/review/wp-asset/**` | 契约 PASS（**与 WP1 并行**） | 不适用（Blender CLI） | 不适用（脚本+渲染图审） | 不适用 |
+| **WP2 (`client`)** | `tennis-2k/client/src/**`、`client/tests/**`、`client/index.html`、`client/vite.config.ts`；报告 `docs/review/wp2/**` | WP1 + WP-Asset 合入 V2 基点 | `3200–3299`（`3201`） | `4200–4299`（`4201`） | `4510–4519`（独立会话） |
+| **WP3 (`server`)** | `tennis-2k/server/**`；报告 `docs/review/wp3/**` | WP1 合入 V2 基点（**与 WP2 并行**） | `3300–3399`（`3301`） | `4300–4399`（`4301`） | 不适用（脚本闭环） |
+| **整合与整体评审 (`integration/v2`)** | 整合分支与联调脚本；报告 `docs/review/integration/**` | WP1 + WP-Asset + WP2 + WP3 全 PASS | `3100–3199` | `4900–4999`（`4901`/`4902`） | `4520–4529`（双独立 Context） |
 
-> **npm Workspaces 并行锁文件红线**：
-> 1. WP1 初始化 `tennis-2k/package.json` 时同步写入最小占位 `client/package.json` 与 `server/package.json`，确保 WP1 阶段 `npm install` 不报 `ENOENT`；
-> 2. **WP2 与 WP3 安装依赖时严禁修改或提交根目录 `tennis-2k/package.json` 与 `tennis-2k/package-lock.json`**（安装各自包依赖可使用 `npm install --workspace=client --package-lock=false` 或提交前还原根目录 `package-lock.json`），仅提交各自 `<pkg>/package.json` 与源码；
-> 3. 整合分支合入 WP1 + WP2 + WP3 后，执行一次干净 `npm install` 生成并提交唯一统一的 `tennis-2k/package-lock.json`。
+> **npm Workspaces 红线**：V2 零新增第三方 npm 依赖，WP1 / WP-Asset / WP2 / WP3 均**严禁修改**根目录 `tennis-2k/package.json`、`package-lock.json` 或各自 `package.json` 依赖项。
 
 ---
 
-## 六、跨工作包端到端联调场景（整合评审第 1 轮必验）
+## 七、跨工作包端到端联调场景（整合评审第 1 轮必验）
 
-- **测试数据与脚本责任人**：整合阶段 Builder 在整合分支提供一键本地启动脚本（支持通过环境变量注入前后端端口、`VITE_WS_PROXY_TARGET`、`VITE_BASE_PATH`、`ENABLE_TEST_HOOKS=1`）及子路径反代测试脚本；由整体评审 Reviewer 编排一次性测试简报，双独立浏览器 Context Tester 执行取证。
+- **测试数据与脚本责任人**：整合阶段 Builder 负责提供一键本地联调启动脚本、`/tennis/` 反代测试脚本与截图亮度校验脚本；整体评审 Reviewer 编排一次性测试简报，双独立浏览器 Context Tester 执行 `E2E-01` ~ `E2E-05` 取证。
 
 | 场景编号 | 关联 SPEC | 入口与前置 | 端到端验证步骤 | 通过标准 |
 | --- | --- | --- | --- | --- |
-| **`E2E-01`** | `AC-10` | 双独立浏览器 Context（**不带 `?test=1`**） | P0 建房得 4 位码 → P1 输码入房选不同流派 → 双方用 `WASD/J/K/L`（含 P1 执行 `W+K` 放小球）打完至少 1 局 Fast4 → 途中 P0 按 `Esc` 暂停、P1 点击恢复走 3s 倒计时并立即按键 → 完赛后双方点击 Rematch 开启新局 | 双端均处于屏幕下方近端向上击球，移动/瞄准/`W+K` 100% 对称无反转；暂停/恢复/3s 倒计时生效且恢复后按键不失灵；Rematch 正确清插值队列、重置 `serverTick=0`、比分与暂停次数 `[3,3]` |
-| **`E2E-02`** | `AC-07`、`AC-10` | 双独立浏览器 Context（`?test=1`，服务端 `ENABLE_TEST_HOOKS=1`） | 联机中调用 `triggerHawkeyeShot({ inBounds: true, distCm: 8 })` 发射真实物理压线球；再测 `distCm: 25` | `8 cm` 球经真实物理判定在双端同步触发 1.8s 3D 鹰眼特写（P1 球印/镜头经 `toLocalEvent` 正确镜像无 180° 错位）并同判 `IN`；`25 cm` 不触发 |
-| **`E2E-03`** | `AC-11` | 双独立浏览器 Context | ① 联机中触发 P1 刷新页面并在 4 秒内通过 `sessionToken` 自动重连 → 恢复瞬间 P1 立即按 `WASD` + `J/K/L`；② 另测 P1 断线并快进/实等超 15 秒 | ① 房主见 15s 暂停倒计时；重连服务端重置 `lastAckSeq[1]=0`、客户端清插值队列并重置 `seq`，`FULL_SYNC` + 3s 倒计时后原比分续打且 **P1 按键 100% 即时响应不丢帧不失灵**；② 超 15s 双方仅收到唯一 `MATCH_OVER(reason:'forfeit')` 结算弹窗 |
-| **`E2E-04`** | `AC-12`、`AC-15` | `VITE_BASE_PATH=/tennis/` 生产构建 + 本地子路径静态与 WS 代理 | 访问 `http://127.0.0.1:<port>/tennis/?netdebug=1` 跑通单机与联机连接，并行执行 16 并发房间 60Hz 后端压测 | 所有静态与 WS 资源 0 个 404；`?netdebug=1` 指标完整；16 并发房间平均 tick `< 8 ms` 且 RSS `≤ 256 MB` |
+| **`E2E-01`** | `AC-02`, `AC-11`, `AC-12` | 双独立浏览器 Context（**不带 `?test=1`**） | P0 建房得 4 位码 → P1 选不同流派入房开赛 → 双方使用 V2 自动触球（`J` 深/`K` 前/`A`/`D` 左右）完打 ≥ 1 局 Fast4 → 途中 P0 `Esc` 暂停、P1 恢复走 3s 倒计时并立即操作 → 完赛双方点击 Rematch 开新局 | 双端均真实加载 Blender `.glb` 角色且处于明亮大满贯日场（无暗箱、无绿条、无火热槽）；双方均在下方近端向上击球且方向 100% 对称；暂停恢复不失灵；Rematch 正确重置比分与 `[3,3]` 暂停次数 |
+| **`E2E-02`** | `AC-05`, `AC-06` | 双独立浏览器 Context（`?test=1`，服务端 `ENABLE_TEST_HOOKS=1`） | 联机下对 P1 调用 `spawnIncomingBall` 发近身来球：① P1 仅移动不按 `J`/`K`/`L`；② P1 提前短按 `K` + `A`（放小球瞄左） | ① P1 0 次自动挥拍、球自然落空；② P1 的 `actionPressed` 边沿经服务端 60Hz 准确触发前场短球（`|Z| ∈ [1.8, 3.9] m`）并镜像同步至 P0 |
+| **`E2E-03`** | `AC-08`, `AC-12` | 双独立浏览器 Context（`?test=1`） | 联机触发 `8 cm` 压线球（`IN`）、`10 cm` 出界球（`OUT`）及 `25 cm` 反例 | `8 cm`/`10 cm` 双端同步切入 1.8s 3D 鹰眼特写（P1 球印/镜头精确 180° 镜像）并同判 `IN`/`OUT`，结束后双方按键立即恢复；`25 cm` 不触发 |
+| **`E2E-04`** | `AC-13` | 双独立浏览器 Context | ① 对局中 P1 刷新页面 4s 内自动重连，3s 倒计时结束瞬间 P1 立即按 `WASD` + `J`/`K`；② 另测 P1 断线超 15s；③ 未开赛 `waiting` 房内 P1 刷新重连 | ① 原比分续打且 **P1 移动与自动触球 100% 即时响应**；② 超 15s 双方仅收唯一 `MATCH_OVER(forfeit)` 结算弹窗；③ `waiting` 房刷新仍留在大厅等待视图 |
+| **`E2E-05`** | `AC-11`, `AC-14`, `AC-16` | `VITE_BASE_PATH=/tennis/` 生产构建 + 本地静态/WS 反代 | 访问 `http://127.0.0.1:<port>/tennis/?netdebug=1` 跑通单机与 1v1 联机，并行执行 16 并发房间 60Hz 30 秒压测 | 静态资源、**`/tennis/assets/models/tennis_player.glb`** 与 `/tennis/ws` 均 0 个 404；`?netdebug=1` 指标完整、单角色 Draw Calls `≤ 18`、全场景 `≤ 150`；16 房平均 tick `< 8 ms`、RSS `≤ 256 MB` |
