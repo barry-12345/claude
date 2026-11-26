@@ -1055,4 +1055,66 @@ describe('@court2k/server V2 integration suite', () => {
     expect(sync.payload.snapshot.pause.disconnected[0]).toBe(false);
     expect(sync.payload.snapshot.lastAckSeq[0]).toBe(0);
   });
+
+  it('allows guest P1 waiting reconnect via original token and invalidates old token once a new guest P2 claims the slot', async () => {
+    const { wsUrl } = await startTestServer();
+    const p0 = await connectClient(wsUrl);
+    p0.send({
+      type: 'CREATE_ROOM',
+      payload: { court: 'hard', format: 'fast4', archetype: 'allcourt' },
+    });
+    const created = await p0.waitFor('ROOM_CREATED');
+    const roomCode = created.payload.roomCode;
+
+    const p1 = await connectClient(wsUrl);
+    p1.send({ type: 'JOIN_ROOM', payload: { roomCode, archetype: 'power' } });
+    const joined = await p1.waitFor('ROOM_JOINED');
+    const p1Token = joined.payload.sessionToken;
+    await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+
+    // 1. P1 disconnects (page refresh) in waiting without another guest joining -> RECONNECT succeeds with FULL_SYNC(waiting)
+    await p1.close();
+    await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === false);
+    p0.clearMessages();
+
+    const p1Rec = await connectClient(wsUrl);
+    p1Rec.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p1Token } });
+    const sync1 = await p1Rec.waitFor('FULL_SYNC');
+    expect(sync1.payload.snapshot.phase).toBe('waiting');
+    expect(sync1.payload.playerIndex).toBe(1);
+    expect(sync1.payload.yourSide).toBe(-1);
+    expect(sync1.payload.snapshot.pause.disconnected[1]).toBe(false);
+    expect(sync1.payload.snapshot.lastAckSeq[1]).toBe(0);
+    expect(sync1.payload.snapshot.config.archetypes[1]).toBe('power');
+
+    const lobby0 = await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+    const lobby1 = await p1Rec.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+    expect(lobby0.payload.matchConfig.archetypes[1]).toBe('power');
+    expect(lobby1.payload.matchConfig.archetypes[1]).toBe('power');
+
+    // 2. P1 disconnects again, P2 joins and takes the guest slot -> old p1Token is invalidated and P2 is unaffected
+    await p1Rec.close();
+    await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === false);
+    p0.clearMessages();
+
+    const p2 = await connectClient(wsUrl);
+    p2.send({ type: 'JOIN_ROOM', payload: { roomCode, archetype: 'serve_volley' } });
+    const joined2 = await p2.waitFor('ROOM_JOINED');
+    expect(joined2.payload.playerIndex).toBe(1);
+    const lobbyAfterP2 = await p0.waitFor('LOBBY_UPDATE', (m) => m.payload.connected[1] === true);
+    expect(lobbyAfterP2.payload.matchConfig.archetypes[1]).toBe('serve_volley');
+
+    const p1Stale = await connectClient(wsUrl);
+    p1Stale.send({ type: 'RECONNECT', payload: { roomCode, sessionToken: p1Token } });
+    const err = await p1Stale.waitFor('ERROR');
+    expect(err.payload.code).toBe('INVALID_TOKEN');
+
+    // Verify P2 remains cleanly bound and can start the match with P0
+    p0.send({ type: 'READY', payload: { ready: true } });
+    p2.send({ type: 'READY', payload: { ready: true } });
+    const start0 = await p0.waitFor('MATCH_START');
+    const start2 = await p2.waitFor('MATCH_START');
+    expect(start0.payload.snapshot.config.archetypes).toEqual(['allcourt', 'serve_volley']);
+    expect(start2.payload.playerIndex).toBe(1);
+  });
 });

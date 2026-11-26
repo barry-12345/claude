@@ -334,13 +334,6 @@ export class Room {
 
     if (this.state.phase === 'waiting') {
       this.ready[idx] = false;
-      if (idx === 1) {
-        // Guest slot is immediately freed during waiting
-        this.sessionTokens[1] = null;
-        this.matchConfig.archetypes[1] = 'allcourt';
-        this.state.config.archetypes[1] = 'allcourt';
-        this.state.players[1].archetype = 'allcourt';
-      }
       this.state = applyDisconnect(this.state, idx);
       if (this.bothDisconnected) {
         this.emptySinceMs = nowMs;
