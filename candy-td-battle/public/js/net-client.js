@@ -7,6 +7,8 @@ export class NetClient {
     this._connectPromise = null;
     this.rttMs = 0;
     this.serverTickMs = 0;
+    this.skippedSnapshots = 0;
+    this._rxSamples = [];
     this.pingTimer = null;
     this.handlers = {
       onRoomState: () => {},
@@ -131,6 +133,17 @@ export class NetClient {
       });
 
       ws.addEventListener('message', (event) => {
+        if (event && event.data !== undefined) {
+          const byteLen =
+            typeof event.data === 'string'
+              ? event.data.length
+              : event.data.byteLength || event.data.size || 0;
+          const now = Date.now();
+          this._rxSamples.push({ at: now, bytes: byteLen });
+          while (this._rxSamples.length > 0 && now - this._rxSamples[0].at > 2000) {
+            this._rxSamples.shift();
+          }
+        }
         let msg;
         try {
           msg = JSON.parse(event.data);
@@ -186,11 +199,25 @@ export class NetClient {
     }
   }
 
+  getWsKbps() {
+    const now = Date.now();
+    const cutoff = now - 1000;
+    let total = 0;
+    for (let i = this._rxSamples.length - 1; i >= 0; i--) {
+      if (this._rxSamples[i].at < cutoff) break;
+      total += this._rxSamples[i].bytes;
+    }
+    return total / 1024;
+  }
+
   _dispatch(msg) {
     switch (msg.type) {
       case 'pong':
         this.rttMs = Math.max(0, Date.now() - (msg.clientTime || Date.now()));
         this.serverTickMs = msg.serverTickMs || 0;
+        if (typeof msg.skippedSnapshots === 'number') {
+          this.skippedSnapshots = msg.skippedSnapshots;
+        }
         break;
       case 'room_state':
         this.saveSession({
@@ -201,6 +228,9 @@ export class NetClient {
         this.handlers.onRoomState(msg);
         break;
       case 'game_snapshot':
+        if (typeof msg.skippedSnapshots === 'number') {
+          this.skippedSnapshots = msg.skippedSnapshots;
+        }
         this.handlers.onSnapshot(msg);
         break;
       case 'game_event':

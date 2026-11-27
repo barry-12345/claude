@@ -130,7 +130,10 @@ export function createCandyServer(options = {}) {
     }
   });
 
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: { threshold: 1024 }
+  });
 
   server.on('upgrade', (req, socket, head) => {
     try {

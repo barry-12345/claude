@@ -667,3 +667,39 @@ test('AC-06 (AI Matrix): CandyAIBot builds >=2 legal towers and increases Eco on
     }
   }
 });
+
+test('V2.1 AC-06: Dual-side W20 stress (25 Lv3 towers + 80 creeps per side, 200 ticks) meets avg <= 4ms & P95 <= 8ms', () => {
+  const sim = new GameSimulation({ seed: 42, mapId: 'classic_s' });
+  sim.nextWaveTick = 99999;
+  sim.grantResources({ targetSlot: 0, hp: 5000, gold: 10000 });
+  sim.grantResources({ targetSlot: 1, hp: 5000, gold: 10000 });
+
+  const stressInfo = sim.spawnStress({ towers: 25, creeps: 80, bothSides: true });
+  assert.equal(stressInfo.placedTowers, 25);
+  assert.equal(stressInfo.spawnedCreeps, 80);
+  assert.equal(stressInfo.oppPlacedTowers, 25);
+  assert.equal(stressInfo.oppSpawnedCreeps, 80);
+  assert.equal(sim.players[0].towers.length, 25);
+  assert.equal(sim.players[1].towers.length, 25);
+
+  const durations = [];
+  for (let i = 0; i < 200; i++) {
+    // Keep creeps alive if depleted so pressure remains realistic across 200 ticks
+    if (sim.players[0].creeps.length < 40) {
+      sim._spawnCreep(sim.players[0], { type: 'iron_titan', hpScale: 3, speedScale: 1, isSent: true });
+    }
+    if (sim.players[1].creeps.length < 40) {
+      sim._spawnCreep(sim.players[1], { type: 'iron_titan', hpScale: 3, speedScale: 1, isSent: true });
+    }
+    const t0 = performance.now();
+    sim.step();
+    durations.push(performance.now() - t0);
+  }
+
+  const avgMs = durations.reduce((a, b) => a + b, 0) / durations.length;
+  const sorted = [...durations].sort((a, b) => a - b);
+  const p95Ms = sorted[Math.floor(sorted.length * 0.95)];
+  console.log(`[AC-06] 200 ticks dual-side stress: avg=${avgMs.toFixed(3)}ms, p95=${p95Ms.toFixed(3)}ms`);
+  assert.ok(avgMs <= 4, `Expected avgMs <= 4ms, got ${avgMs.toFixed(3)}ms`);
+  assert.ok(p95Ms <= 8, `Expected p95Ms <= 8ms, got ${p95Ms.toFixed(3)}ms`);
+});

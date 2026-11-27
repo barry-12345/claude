@@ -7,7 +7,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createCandyServer } from '../server/index.js';
-import { MAP_ORDER, ROOM_CODE_CHARS } from '../public/js/shared/constants.js';
+import { MAP_ORDER, ROOM_CODE_CHARS, isBuildableCell } from '../public/js/shared/constants.js';
 import { NetClient } from '../public/js/net-client.js';
 import { CandyAudio } from '../public/js/audio.js';
 
@@ -677,5 +677,285 @@ test('AC-17: CandyAudio falls back to in-memory mute state when sessionStorage t
     assert.equal(audio.muted, false);
   } finally {
     globalThis.sessionStorage = prevStorage;
+  }
+});
+
+test('V2.1 AC-03 & AC-07: Bandwidth reduction >=60% (deflate + opponentLite + event dedup/cap), set_view_mode & backpressure', async () => {
+  const srv = createCandyServer({ port: 0, allowTestHooks: true });
+  const port = await srv.start();
+  const ws = await connectWs(`ws://127.0.0.1:${port}/ws`);
+
+  try {
+    ws.send(JSON.stringify({ type: 'create_room', mode: 'ai', aiDifficulty: 'casual', mapId: 'classic_s', nickname: 'PerfP1' }));
+    await ws.waitFor((m) => m.type === 'room_state' && m.phase === 'COUNTDOWN');
+
+    // Enter PLAYING and spawn W20 dual-side stress
+    ws.send(JSON.stringify({ type: 'test_command', action: 'fastForwardTicks', payload: { ticks: 1 } }));
+    await ws.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'PLAYING' && m.tick >= 1);
+
+    ws.send(JSON.stringify({ type: 'test_command', action: 'grantResources', payload: { target: 'self', gold: 5000, hp: 5000 } }));
+    await ws.waitFor((m) => m.type === 'test_command_result' && m.action === 'grantResources');
+    ws.send(JSON.stringify({ type: 'test_command', action: 'grantResources', payload: { target: 'opponent', hp: 5000 } }));
+    await ws.waitFor((m) => m.type === 'test_command_result' && m.action === 'grantResources');
+    ws.send(JSON.stringify({ type: 'test_command', action: 'jumpWave', payload: { waveNum: 20 } }));
+    await ws.waitFor((m) => m.type === 'test_command_result' && m.action === 'jumpWave');
+    ws.send(
+      JSON.stringify({
+        type: 'test_command',
+        action: 'spawnStress',
+        payload: { towers: 25, creeps: 80, bothSides: true, oppTowers: 14, oppCreeps: 60 }
+      })
+    );
+    await ws.waitFor((m) => m.type === 'test_command_result' && m.action === 'spawnStress');
+
+    // 1. Measure real compressed wire bytes over 1s (~20 periodic ticks) vs V2 full uncompressed baseline
+    ws.drainQueue();
+    const sock = ws._socket;
+    const bytesBefore = sock.bytesRead;
+    const room = [...srv.roomManager.rooms.values()][0];
+    let baselineBytes = 0;
+    const origBroadcast = srv.roomManager._broadcastSnapshot.bind(srv.roomManager);
+    srv.roomManager._broadcastSnapshot = (r, evs, opts) => {
+      if (opts?.isPeriodic && r.sim) {
+        const fullSnap = r.sim.getClientSnapshot(0, r.phase, { opponentLite: false });
+        baselineBytes += Buffer.byteLength(JSON.stringify(fullSnap), 'utf8');
+        if (evs && evs.length > 0) {
+          baselineBytes += Buffer.byteLength(JSON.stringify({ type: 'game_event', tick: r.sim.tick, events: evs }), 'utf8');
+        }
+      }
+      return origBroadcast(r, evs, opts);
+    };
+
+    const periodicSnaps = [];
+    const collectStart = Date.now();
+    while (Date.now() - collectStart < 1050) {
+      const m = await ws.waitFor((msg) => msg.type === 'game_snapshot' || msg.type === 'game_event', 1500);
+      if (m.type === 'game_snapshot') periodicSnaps.push(m);
+      if (m.type === 'game_event') {
+        const nonCrit = m.events.filter((e) =>
+          ['tower_shot', 'mint_splash', 'popcorn_boom', 'shield_hit', 'shield_break', 'creep_pop', 'frost_nova', 'brittle_shatter', 'healer_pulse', 'execute_hit', 'macaron_cracked'].includes(e.type)
+        );
+        assert.ok(nonCrit.length <= 24, `Non-critical events must be <= 24, got ${nonCrit.length}`);
+        // Every non-critical event must belong to watched slot 0 (self view)
+        for (const ev of nonCrit) {
+          assert.equal(ev.slot, 0, 'In self view, combat events must only be for slot 0');
+        }
+      }
+    }
+    srv.roomManager._broadcastSnapshot = origBroadcast;
+    const wireBytes = sock.bytesRead - bytesBefore;
+    const reductionPct = ((baselineBytes - wireBytes) / Math.max(1, baselineBytes)) * 100;
+    console.log(`[AC-03] 1s W20 bandwidth: baseline=${baselineBytes}B, v2.1_wire=${wireBytes}B, reduction=${reductionPct.toFixed(1)}%`);
+    assert.ok(baselineBytes > 10000, 'Expected substantial V2 baseline bytes');
+    assert.ok(reductionPct >= 60, `Expected >=60% bandwidth reduction, got ${reductionPct.toFixed(1)}%`);
+
+    // Verify opponentLite on non-%10 periodic ticks and full on %10 ticks
+    const liteTick = periodicSnaps.find((s) => s.tick % 10 !== 0);
+    const fullTick = periodicSnaps.find((s) => s.tick % 10 === 0);
+    assert.ok(liteTick, 'Should observe non-%10 periodic snapshot');
+    assert.equal(liteTick.opponentLite, true);
+    assert.equal(liteTick.opponent.creeps, undefined);
+    assert.equal(liteTick.opponent.projectiles, undefined);
+    assert.equal(liteTick.opponent.lavaZones, undefined);
+    assert.ok(Array.isArray(liteTick.opponent.towers));
+    assert.ok(fullTick, 'Should observe %10 periodic snapshot');
+    assert.equal(Boolean(fullTick.opponentLite), false);
+    assert.ok(Array.isArray(fullTick.opponent.creeps));
+
+    // 2. AC-07: set_view_mode 'opponent' immediately delivers full snapshot & 20Hz sync
+    ws.drainQueue();
+    ws.send(JSON.stringify({ type: 'set_view_mode', mode: 'opponent' }));
+    const immOpp = await ws.waitFor((m) => m.type === 'game_snapshot');
+    assert.equal(Boolean(immOpp.opponentLite), false);
+    assert.ok(immOpp.opponent.creeps.length > 0);
+    // Verify next non-%10 periodic tick is also full in opponent view
+    const nextOppNonTen = await ws.waitFor((m) => m.type === 'game_snapshot' && m.tick % 10 !== 0);
+    assert.equal(Boolean(nextOppNonTen.opponentLite), false);
+    assert.ok(Array.isArray(nextOppNonTen.opponent.creeps));
+
+    // Switch back to self view
+    ws.send(JSON.stringify({ type: 'set_view_mode', mode: 'self' }));
+    const backSelfLite = await ws.waitFor((m) => m.type === 'game_snapshot' && m.tick % 10 !== 0);
+    assert.equal(backSelfLite.opponentLite, true);
+
+    // 3. AC-03 Backpressure: bufferedAmount > 64KB skips periodic snapshots but place_tower responds immediately
+    const serverWs = [...srv.wss.clients][0];
+    Object.defineProperty(serverWs, 'bufferedAmount', {
+      get: () => 131072, // 128 KB > 64 KB
+      configurable: true
+    });
+    ws.drainQueue();
+    await new Promise((r) => setTimeout(r, 320)); // ~6 periodic ticks
+    const skippedWhileBackpressured = ws.drainQueue().filter((m) => m.type === 'game_snapshot');
+    assert.equal(skippedWhileBackpressured.length, 0, 'Periodic snapshots must be skipped when bufferedAmount > 64KB');
+    assert.ok(room.players[0].skippedSnapshots >= 3, `Expected skippedSnapshots >= 3, got ${room.players[0].skippedSnapshots}`);
+
+    // Find a free buildable cell and send place_tower while still backpressured
+    let freeCol = -1;
+    let freeRow = -1;
+    outer: for (let col = 17; col >= 0; col--) {
+      for (let row = 8; row >= 0; row--) {
+        if (
+          isBuildableCell(room.sim.mapId, col, row, room.sim.players[0].clearedObstacles) &&
+          !room.sim.players[0].occupiedCells.has(`${col},${row}`)
+        ) {
+          freeCol = col;
+          freeRow = row;
+          break outer;
+        }
+      }
+    }
+    assert.ok(freeCol >= 0 && freeRow >= 0, 'Expected a free buildable cell');
+    const prevTowers = room.sim.players[0].towers.length;
+    const tPlace0 = Date.now();
+    ws.send(JSON.stringify({ type: 'place_tower', towerType: 'strawberry', col: freeCol, row: freeRow }));
+    const actionSnap = await ws.waitFor((m) => m.type === 'game_snapshot' && m.self.towers.length === prevTowers + 1, 300);
+    const placeLatency = Date.now() - tPlace0;
+    assert.ok(placeLatency <= 300, `place_tower must reply in <=300ms, got ${placeLatency}ms`);
+    assert.ok(actionSnap.skippedSnapshots >= 3);
+
+    // 4. AC-03 Backpressure + Match End: bufferedAmount > 64KB must NEVER skip ENDED snapshot
+    ws.drainQueue();
+    room.sim.players[0].towers = [];
+    room.sim.players[0].hp = 1;
+    room.sim.players[1].hp = 5000;
+    const lethalCreep = room.sim._spawnCreep(room.sim.players[0], {
+      type: 'jelly',
+      hpScale: 1,
+      speedScale: 2,
+      isSent: false
+    });
+    lethalCreep.progress = 0.995;
+
+    const endedState = await ws.waitFor((m) => m.type === 'room_state' && m.phase === 'ENDED', 2000);
+    const endedSnap = await ws.waitFor((m) => m.type === 'game_snapshot' && m.phase === 'ENDED', 2000);
+    const endedEv = await ws.waitFor(
+      (m) => m.type === 'game_event' && m.events.some((e) => e.type === 'match_ended'),
+      2000
+    );
+    assert.equal(endedState.phase, 'ENDED');
+    assert.ok(endedSnap.endedResult);
+    assert.equal(endedSnap.endedResult.winnerSlot, 1);
+    assert.equal(endedSnap.endedResult.reason, 'hp_zero');
+    assert.equal(endedEv.events.find((e) => e.type === 'match_ended').endedResult.winnerSlot, 1);
+
+    // Restore bufferedAmount
+    Object.defineProperty(serverWs, 'bufferedAmount', {
+      get: () => 0,
+      configurable: true
+    });
+  } finally {
+    ws.close();
+    await srv.stop();
+  }
+});
+
+test('V2.1 AC-05: CandyAudio throttles high-frequency combat sounds within 65ms cooldown', async () => {
+  const audio = new CandyAudio();
+  audio.setMuted(false);
+
+  const throttled = ['pop', 'frost', 'boom', 'laser', 'shield_hit', 'heal_pulse'];
+  for (const s of throttled) {
+    for (let i = 0; i < 10; i++) {
+      audio.play(s);
+    }
+  }
+  // Each throttled sound should appear only once within the burst
+  for (const s of throttled) {
+    const count = audio.eventLog.filter((e) => e.name === s).length;
+    assert.equal(count, 1, `Expected ${s} to be throttled to 1 within 65ms, got ${count}`);
+  }
+
+  // Non-throttled sounds (e.g. build, coin) are not throttled
+  audio.play('build');
+  audio.play('build');
+  assert.equal(audio.eventLog.filter((e) => e.name === 'build').length, 2);
+
+  // After > 65ms cooldown, pop can play again
+  await new Promise((r) => setTimeout(r, 80));
+  audio.play('pop');
+  assert.equal(audio.eventLog.filter((e) => e.name === 'pop').length, 2);
+});
+
+test('V2.1 AC-04: NetClient returns false when offline, tracks wsKbps/skippedSnapshots, and reconnects with token', async () => {
+  const srv = createCandyServer({ port: 0, allowTestHooks: true });
+  const port = await srv.start();
+  const prevWS = globalThis.WebSocket;
+  const prevLocation = globalThis.location;
+  const prevStorage = globalThis.sessionStorage;
+
+  const store = new Map();
+  globalThis.WebSocket = WebSocket;
+  globalThis.location = { protocol: 'http:', host: `127.0.0.1:${port}`, pathname: '/' };
+  globalThis.sessionStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v))
+  };
+
+  const net = new NetClient();
+  try {
+    // Offline send must return false (never silent true)
+    assert.equal(net.send({ type: 'place_tower', towerType: 'strawberry', col: 1, row: 1 }), false);
+
+    let roomState = null;
+    let latestSnap = null;
+    let disconnected = false;
+    net.handlers.onRoomState = (st) => {
+      roomState = st;
+    };
+    net.handlers.onSnapshot = (snap) => {
+      latestSnap = snap;
+    };
+    net.handlers.onConnectionChange = (conn) => {
+      if (!conn) disconnected = true;
+    };
+
+    await net.connect();
+    assert.equal(net.send({ type: 'create_room', mode: 'ai', mapId: 'classic_s', nickname: 'ReconnP1' }), true);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.ok(roomState && roomState.reconnectToken);
+
+    await net.sendTestCommand('fastForwardTicks', { ticks: 1 });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.ok(latestSnap && latestSnap.phase === 'PLAYING');
+    assert.ok(net.getWsKbps() > 0, 'Expected wsKbps > 0 while receiving snapshots');
+
+    // Drop server socket unexpectedly
+    const serverWs = [...srv.wss.clients][0];
+    serverWs.terminate();
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(disconnected, true);
+    assert.equal(net.connected, false);
+    // Offline action send returns false immediately
+    assert.equal(net.send({ type: 'place_tower', towerType: 'strawberry', col: 2, row: 1 }), false);
+
+    // Reconnect using saved session token
+    await net.connect();
+    const sentRejoin = net.send({
+      type: 'join_room',
+      roomCode: net.session.roomCode,
+      nickname: net.session.nickname || 'ReconnP1',
+      playerId: net.session.playerId,
+      reconnectToken: net.session.reconnectToken
+    });
+    assert.equal(sentRejoin, true);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(roomState.phase, 'PLAYING');
+    assert.equal(net.send({ type: 'place_tower', towerType: 'strawberry', col: 2, row: 1 }), true);
+    await new Promise((r) => setTimeout(r, 120));
+    assert.ok(latestSnap.self.towers.length >= 1, 'Tower placement must succeed after reconnect');
+  } finally {
+    net._stopPing();
+    if (net.ws) {
+      try {
+        net.ws.close();
+      } catch {
+        // ignore
+      }
+    }
+    globalThis.WebSocket = prevWS;
+    globalThis.location = prevLocation;
+    globalThis.sessionStorage = prevStorage;
+    await srv.stop();
   }
 });

@@ -30,6 +30,102 @@ let latestRoomState = null;
 let matchEndAudioPlayed = false;
 let lobbyConnecting = false;
 
+const RECONNECT_BACKOFF_MS = [600, 1200, 2400, 4000];
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+let reconnectInFlight = false;
+let reconnectToastAt = 0;
+let offlineActionToastAt = 0;
+
+function stopReconnectLoop() {
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectAttempt = 0;
+}
+
+function canAutoReconnect() {
+  if (!latestRoomState) return false;
+  const phase = latestRoomState.phase;
+  if (phase !== 'PLAYING' && phase !== 'COUNTDOWN' && phase !== 'PAUSED_RECONNECT') {
+    return false;
+  }
+  const s = net.session;
+  return Boolean(s && s.roomCode && s.reconnectToken);
+}
+
+function scheduleReconnect({ immediate = false } = {}) {
+  if (!canAutoReconnect()) {
+    stopReconnectLoop();
+    return;
+  }
+  if (net.connected && net.ws && net.ws.readyState === WebSocket.OPEN) {
+    stopReconnectLoop();
+    return;
+  }
+  if (reconnectInFlight) return;
+  if (reconnectTimer !== null) {
+    if (!immediate) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  const delay = immediate
+    ? 0
+    : RECONNECT_BACKOFF_MS[Math.min(reconnectAttempt, RECONNECT_BACKOFF_MS.length - 1)];
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (!canAutoReconnect()) {
+      stopReconnectLoop();
+      return;
+    }
+    if (net.connected && net.ws && net.ws.readyState === WebSocket.OPEN) {
+      stopReconnectLoop();
+      return;
+    }
+
+    reconnectInFlight = true;
+    let shouldRetry = false;
+    try {
+      await net.connect({ timeoutMs: 3500 });
+      if (!canAutoReconnect()) {
+        stopReconnectLoop();
+        return;
+      }
+      const s = net.session;
+      net.send({
+        type: 'join_room',
+        roomCode: s.roomCode,
+        nickname: s.nickname || ui.getNickname(),
+        playerId: s.playerId,
+        reconnectToken: s.reconnectToken
+      });
+      stopReconnectLoop();
+    } catch {
+      reconnectAttempt += 1;
+      shouldRetry = true;
+    } finally {
+      reconnectInFlight = false;
+    }
+    if (shouldRetry) {
+      scheduleReconnect();
+    }
+  }, delay);
+}
+
+function sendGameplayAction(payload) {
+  if (net.send(payload)) return true;
+  const now = Date.now();
+  if (now - offlineActionToastAt >= 1500) {
+    offlineActionToastAt = now;
+    ui.showToast('连接已断开，正在自动重连，请稍候再试...', 2200);
+  }
+  scheduleReconnect({ immediate: true });
+  return false;
+}
+
 function formatConnectError(err) {
   if (err && err.message === 'WS_CONNECT_TIMEOUT') {
     return '连接对战服务器超时，请检查服务状态、网络或代理设置后重试';
@@ -111,22 +207,29 @@ const ui = new CandyUI({
       ui.setSelectedObstacle(obs);
     },
     onUpgradeTower(towerId, branch) {
-      net.send({
+      return sendGameplayAction({
         type: 'upgrade_tower',
         towerId,
         ...(branch ? { branch } : {})
       });
     },
+    onSellTower(towerId) {
+      return sendGameplayAction({ type: 'sell_tower', towerId });
+    },
+    onSetTargeting(towerId, targeting) {
+      return sendGameplayAction({ type: 'set_targeting', towerId, targeting });
+    },
     onDemolishObstacle(col, row) {
-      net.send({ type: 'demolish_obstacle', col, row });
+      return sendGameplayAction({ type: 'demolish_obstacle', col, row });
     },
     onSendWave(sendType) {
-      net.send({ type: 'send_wave', sendType });
+      return sendGameplayAction({ type: 'send_wave', sendType });
     },
     onReturnSelfView() {
       input.setViewMode('self');
     },
     onReturnHome() {
+      stopReconnectLoop();
       net.send({ type: 'leave_room' });
       latestRoomState = null;
       matchEndAudioPlayed = false;
@@ -158,7 +261,7 @@ const input = new InputController({
     }
   },
   onPlaceTower(towerType, col, row) {
-    net.send({ type: 'place_tower', towerType, col, row });
+    return sendGameplayAction({ type: 'place_tower', towerType, col, row });
   },
   onSelectTower(tower) {
     renderer.selectedTowerId = tower ? tower.id : null;
@@ -174,10 +277,13 @@ const input = new InputController({
     ui.showOpponentTowerCard(tower, pt);
   },
   onSendWave(sendType) {
-    net.send({ type: 'send_wave', sendType });
+    return sendGameplayAction({ type: 'send_wave', sendType });
   },
   onViewModeChange(mode) {
     ui.setViewMode(mode);
+    if (latestRoomState && latestRoomState.phase === 'PLAYING') {
+      net.send({ type: 'set_view_mode', mode });
+    }
   },
   onToggleHelp() {
     ui.toggleHelp();
@@ -203,6 +309,14 @@ net.handlers.onRoomState = (state) => {
     matchEndAudioPlayed = false;
     renderer.resetMatchState();
     ui.resetForNewMatch();
+  }
+  if (state.phase === 'PLAYING' && net.connected) {
+    stopReconnectLoop();
+    if (input.viewMode === 'opponent') {
+      net.send({ type: 'set_view_mode', mode: 'opponent' });
+    }
+  } else if (state.phase === 'ENDED' || state.phase === 'LOBBY') {
+    stopReconnectLoop();
   }
   ui.updateRoomState(state);
   input.setEnabled(state.phase === 'PLAYING');
@@ -247,6 +361,7 @@ net.handlers.onEvents = (events) => {
     else if (ev.type === 'life_lost' && ev.slot === mySlot) {
       playOnce('hurt');
     } else if (ev.type === 'match_ended' && ev.endedResult) {
+      ui.renderEndedResult(ev.endedResult);
       maybePlayMatchEndAudio(ev.endedResult);
     } else if (ev.type === 'tower_shot' && ev.slot === mySlot) {
       if (ev.towerType === 'strawberry') playOnce('pop');
@@ -262,24 +377,17 @@ net.handlers.onError = (err) => {
 };
 
 net.handlers.onConnectionChange = (connected) => {
-  if (!connected && latestRoomState && latestRoomState.phase === 'PLAYING') {
-    ui.showToast('网络连接已断开，正在尝试自动重连...');
-    setTimeout(() => {
-      const s = net.session;
-      if (s.roomCode && s.reconnectToken) {
-        net.connect()
-          .then(() => {
-            net.send({
-              type: 'join_room',
-              roomCode: s.roomCode,
-              nickname: s.nickname || ui.getNickname(),
-              playerId: s.playerId,
-              reconnectToken: s.reconnectToken
-            });
-          })
-          .catch(() => {});
-      }
-    }, 600);
+  if (connected) {
+    stopReconnectLoop();
+    return;
+  }
+  if (canAutoReconnect()) {
+    const now = Date.now();
+    if (now - reconnectToastAt >= 3000) {
+      reconnectToastAt = now;
+      ui.showToast('网络连接已断开，正在尝试自动重连...');
+    }
+    scheduleReconnect();
   }
 };
 
@@ -340,8 +448,14 @@ if (testModeEnabled) {
     jumpWave(waveNum) {
       return net.sendTestCommand('jumpWave', { waveNum });
     },
-    spawnStress({ towers = 15, creeps = 45 } = {}) {
-      return net.sendTestCommand('spawnStress', { towers, creeps });
+    spawnStress({ towers = 15, creeps = 45, bothSides = false, oppTowers, oppCreeps } = {}) {
+      return net.sendTestCommand('spawnStress', {
+        towers,
+        creeps,
+        bothSides,
+        ...(oppTowers !== undefined ? { oppTowers } : {}),
+        ...(oppCreeps !== undefined ? { oppCreeps } : {})
+      });
     },
     fastForwardTicks(ticks) {
       return net.sendTestCommand('fastForwardTicks', { ticks });
@@ -364,7 +478,16 @@ if (testModeEnabled) {
         selectedTowerId: renderer.selectedTowerId,
         hoverOpponentTowerId: renderer.hoverOpponentTowerId,
         tooltipVisible: ui.tooltipVisible,
-        helpOpen: ui.helpOpen
+        helpOpen: ui.helpOpen,
+        wsKbps: Number(net.getWsKbps().toFixed(2)),
+        skippedSnapshots: net.skippedSnapshots || 0,
+        fps: renderer.fps,
+        renderMs: renderer.renderMs,
+        serverTickMs: net.serverTickMs || 0,
+        lasers: renderer.lasers.length,
+        splashRings: renderer.splashRings.length,
+        activeParticles: renderer.activeParticleCount,
+        activeFloatTexts: renderer.activeFloatTextCount
       };
     }
   };

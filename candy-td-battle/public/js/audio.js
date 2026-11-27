@@ -1,4 +1,6 @@
 const MUTE_KEY = 'candy_td_muted';
+const THROTTLED_SOUNDS = new Set(['pop', 'frost', 'boom', 'laser', 'shield_hit', 'heal_pulse']);
+const AUDIO_COOLDOWN_MS = 65;
 
 export class CandyAudio {
   constructor() {
@@ -10,6 +12,7 @@ export class CandyAudio {
       this.muted = false;
     }
     this.eventLog = [];
+    this._lastPlayAt = new Map();
   }
 
   _ensureContext() {
@@ -72,10 +75,19 @@ export class CandyAudio {
   }
 
   play(name) {
-    this.eventLog.push({ name, at: Date.now() });
+    const now = Date.now();
+    if (THROTTLED_SOUNDS.has(name)) {
+      const last = this._lastPlayAt.get(name) || 0;
+      if (now - last < AUDIO_COOLDOWN_MS) {
+        return false;
+      }
+      this._lastPlayAt.set(name, now);
+    }
+
+    this.eventLog.push({ name, at: now });
     if (this.eventLog.length > 50) this.eventLog.shift();
 
-    if (this.muted) return;
+    if (this.muted) return false;
 
     switch (name) {
       case 'build':

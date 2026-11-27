@@ -45,6 +45,18 @@ export class CandyUI {
 
     this.$ = (id) => document.getElementById(id);
     this._cacheElements();
+    this._hudCache = {};
+    this._popoverState = {
+      key: null,
+      targeting: null,
+      canAfford: null,
+      canAffordA: null,
+      canAffordB: null,
+      refund: null,
+      left: null,
+      top: null
+    };
+    this._obsState = { key: null, canAfford: null, left: null, top: null };
     this._buildMapPickers();
     this._buildActionCards();
     this._buildHelpCodex();
@@ -60,6 +72,7 @@ export class CandyUI {
     this.elPeekBanner = this.$('peek-banner');
     this.elExpressBanner = this.$('incoming-express-banner');
     this.elOvertimeBanner = this.$('overtime-banner');
+    this.elOvertimeWaveNum = this.$('overtime-wave-num');
     this.elOutgoingPill = this.$('outgoing-express-pill');
     this.elTowerPopover = this.$('tower-popover');
     this.elObstaclePopover = this.$('obstacle-popover');
@@ -75,6 +88,42 @@ export class CandyUI {
     this.elHelpOverlay = this.$('help-overlay');
     this.elNetDebug = this.$('netdebug-panel');
     this.elToastContainer = this.$('toast-container');
+
+    // Cached HUD refs (avoid 20Hz getElementById)
+    this.elHudMapName = this.$('hud-map-name');
+    this.elHudSelfHp = this.$('hud-self-hp');
+    this.elHudSelfGold = this.$('hud-self-gold');
+    this.elHudSelfEco = this.$('hud-self-eco');
+    this.elHudEcoBar = this.$('hud-eco-bar');
+    this.elHudWavePill = this.$('hud-wave-pill');
+    this.elHudWaveText = this.$('hud-wave-text');
+    this.elHudOppName = this.$('hud-opp-name');
+    this.elHudOppHp = this.$('hud-opp-hp');
+    this.elHudOppEco = this.$('hud-opp-eco');
+    this.elHudOppAlertLamp = this.$('hud-opp-alert-lamp');
+
+    // Cached Tower Popover refs
+    this.elTpTitle = this.$('tp-title');
+    this.elTpBuffBadge = this.$('tp-buff-badge');
+    this.elTpStats = this.$('tp-stats');
+    this.elTpTgtBtns = Array.from(this.elTowerPopover.querySelectorAll('.tgt-btn'));
+    this.elTpUpgradeSingle = this.$('tp-upgrade-single');
+    this.elTpBranchGrid = this.$('tp-branch-grid');
+    this.elTpUpgrade = this.$('tp-upgrade');
+    this.elTpBranchA = this.$('tp-branch-a');
+    this.elTpBranchAName = this.$('tp-branch-a-name');
+    this.elTpBranchACost = this.$('tp-branch-a-cost');
+    this.elTpBranchADesc = this.$('tp-branch-a-desc');
+    this.elTpBranchB = this.$('tp-branch-b');
+    this.elTpBranchBName = this.$('tp-branch-b-name');
+    this.elTpBranchBCost = this.$('tp-branch-b-cost');
+    this.elTpBranchBDesc = this.$('tp-branch-b-desc');
+    this.elTpSell = this.$('tp-sell');
+
+    // Cached Obstacle Popover refs
+    this.elOpTitle = this.$('op-title');
+    this.elOpBuffPreview = this.$('op-buff-preview');
+    this.elOpDemolish = this.$('op-demolish');
   }
 
   _renderMiniMapSvg(mapId) {
@@ -461,18 +510,27 @@ export class CandyUI {
 
     this.$('tp-sell').addEventListener('click', () => {
       if (this.renderer.isPeekingProtected() || !this.selectedTowerId) return;
-      this.net.send({ type: 'sell_tower', towerId: this.selectedTowerId });
-      this.callbacks.onSelectTower(null);
+      if (this.callbacks.onSellTower) {
+        const sent = this.callbacks.onSellTower(this.selectedTowerId);
+        if (sent !== false) this.callbacks.onSelectTower(null);
+      } else {
+        this.net.send({ type: 'sell_tower', towerId: this.selectedTowerId });
+        this.callbacks.onSelectTower(null);
+      }
     });
 
     this.elTowerPopover.querySelectorAll('.tgt-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         if (this.renderer.isPeekingProtected() || !this.selectedTowerId) return;
-        this.net.send({
-          type: 'set_targeting',
-          towerId: this.selectedTowerId,
-          targeting: btn.dataset.target
-        });
+        if (this.callbacks.onSetTargeting) {
+          this.callbacks.onSetTargeting(this.selectedTowerId, btn.dataset.target);
+        } else {
+          this.net.send({
+            type: 'set_targeting',
+            towerId: this.selectedTowerId,
+            targeting: btn.dataset.target
+          });
+        }
       });
     });
 
@@ -482,8 +540,10 @@ export class CandyUI {
 
     this.$('op-demolish').addEventListener('click', () => {
       if (this.renderer.isPeekingProtected() || !this.selectedObstacle) return;
-      this.callbacks.onDemolishObstacle(this.selectedObstacle.col, this.selectedObstacle.row);
-      this.callbacks.onSelectObstacle(null);
+      const sent = this.callbacks.onDemolishObstacle(this.selectedObstacle.col, this.selectedObstacle.row);
+      if (sent !== false) {
+        this.callbacks.onSelectObstacle(null);
+      }
     });
   }
 
@@ -559,6 +619,8 @@ export class CandyUI {
     if (isOpp) {
       this.selectedTowerId = null;
       this.selectedObstacle = null;
+      this._resetPopoverCache();
+      this._obsState = { key: null, canAfford: null, left: null, top: null };
       this.renderer.selectedTowerId = null;
       this.renderer.selectedObstacleKey = null;
       this.elTowerPopover.classList.add('hidden');
@@ -599,6 +661,9 @@ export class CandyUI {
     this.selectedBuildType = null;
     this.selectedTowerId = null;
     this.selectedObstacle = null;
+    this._hudCache = {};
+    this._resetPopoverCache();
+    this._obsState = { key: null, canAfford: null, left: null, top: null };
     this.setSelectedBuild(null);
     this.setSelectedTower(null);
     this.setSelectedObstacle(null);
@@ -610,10 +675,22 @@ export class CandyUI {
     this.elOpponentTowerCard.classList.add('hidden');
     this._hideTooltip();
     this.$('rematch-status').textContent = '';
-    const oppLamp = this.$('hud-opp-alert-lamp');
-    oppLamp.textContent = '🚚 待命';
-    oppLamp.classList.remove('active');
+    this.elHudOppAlertLamp.textContent = '🚚 待命';
+    this.elHudOppAlertLamp.classList.remove('active');
     this.setViewMode('self');
+  }
+
+  _resetPopoverCache() {
+    this._popoverState = {
+      key: null,
+      targeting: null,
+      canAfford: null,
+      canAffordA: null,
+      canAffordB: null,
+      refund: null,
+      left: null,
+      top: null
+    };
   }
 
   setSelectedBuild(type) {
@@ -626,6 +703,7 @@ export class CandyUI {
   setSelectedTower(tower) {
     this.selectedTowerId = tower ? tower.id : null;
     if (!tower) {
+      this._resetPopoverCache();
       this.elTowerPopover.classList.add('hidden');
       return;
     }
@@ -636,6 +714,7 @@ export class CandyUI {
   setSelectedObstacle(obs) {
     this.selectedObstacle = obs || null;
     if (!obs) {
+      this._obsState = { key: null, canAfford: null, left: null, top: null };
       this.elObstaclePopover.classList.add('hidden');
       return;
     }
@@ -648,21 +727,38 @@ export class CandyUI {
       this.elObstaclePopover.classList.add('hidden');
       return;
     }
-    const bDef = BUFF_TILE_DEFS[obs.buff];
-    const icon = OBSTACLE_ICONS[obs.kind] || '🍬';
-    this.$('op-title').textContent = `${icon} ${obs.label}`;
-    this.$('op-buff-preview').textContent = `解锁：${bDef.icon} ${bDef.name}（${bDef.desc}）`;
-    const btn = this.$('op-demolish');
+    const obsKey = `${obs.col},${obs.row}`;
     const gold = this.snapshot?.self?.gold || 0;
-    btn.textContent = `💰 拆迁 $${DEMOLISH_COST}`;
-    btn.disabled = gold < DEMOLISH_COST;
+    const canAfford = gold >= DEMOLISH_COST;
 
-    const pos = cellToPixel(obs.col, obs.row);
-    const left = Math.min(CANVAS_WIDTH - 290, Math.max(104, pos.x + 34));
-    const top = Math.min(430, Math.max(66, pos.y - 68));
-    this.elObstaclePopover.style.left = `${left}px`;
-    this.elObstaclePopover.style.top = `${top}px`;
-    this.elObstaclePopover.classList.remove('hidden');
+    if (this._obsState.key !== obsKey) {
+      this._obsState.key = obsKey;
+      const bDef = BUFF_TILE_DEFS[obs.buff];
+      const icon = OBSTACLE_ICONS[obs.kind] || '🍬';
+      this.elOpTitle.textContent = `${icon} ${obs.label}`;
+      this.elOpBuffPreview.textContent = `解锁：${bDef.icon} ${bDef.name}（${bDef.desc}）`;
+      this.elOpDemolish.textContent = `💰 拆迁 $${DEMOLISH_COST}`;
+
+      const pos = cellToPixel(obs.col, obs.row);
+      const left = Math.min(CANVAS_WIDTH - 290, Math.max(104, pos.x + 34));
+      const top = Math.min(430, Math.max(66, pos.y - 68));
+      if (this._obsState.left !== left) {
+        this._obsState.left = left;
+        this.elObstaclePopover.style.left = `${left}px`;
+      }
+      if (this._obsState.top !== top) {
+        this._obsState.top = top;
+        this.elObstaclePopover.style.top = `${top}px`;
+      }
+    }
+
+    if (this._obsState.canAfford !== canAfford) {
+      this._obsState.canAfford = canAfford;
+      this.elOpDemolish.disabled = !canAfford;
+    }
+    if (this.elObstaclePopover.classList.contains('hidden')) {
+      this.elObstaclePopover.classList.remove('hidden');
+    }
   }
 
   _renderTowerPopover(tower) {
@@ -670,73 +766,113 @@ export class CandyUI {
       this.elTowerPopover.classList.add('hidden');
       return;
     }
+
     const def = TOWER_DEFS[tower.type];
-    const lv = getTowerLevelDef(tower.type, tower.level, tower.branch);
-    const buff = tower.buffTile ? BUFF_TILE_DEFS[tower.buffTile] : null;
-    const effRange = Math.round(lv.range * (tower.buffTile === 'range' ? 1.2 : 1));
-    const effRate = (lv.rate * (tower.buffTile === 'rate' ? 1.2 : 1)).toFixed(2);
-    const effDmg = Math.round(lv.damage * (tower.buffTile === 'damage' ? 1.15 : 1));
+    const popoverKey = `${tower.id}:${tower.type}:${tower.level}:${tower.branch || ''}`;
+    const structureChanged = this._popoverState.key !== popoverKey;
 
-    const branchTag = tower.level === 3 && tower.branch ? ` · ${lv.icon}${lv.shortName}` : '';
-    this.$('tp-title').textContent = `${def.name} Lv.${tower.level}${branchTag}`;
+    if (structureChanged) {
+      this._popoverState.key = popoverKey;
+      const lv = getTowerLevelDef(tower.type, tower.level, tower.branch);
+      const buff = tower.buffTile ? BUFF_TILE_DEFS[tower.buffTile] : null;
+      const effRange = Math.round(lv.range * (tower.buffTile === 'range' ? 1.2 : 1));
+      const effRate = (lv.rate * (tower.buffTile === 'rate' ? 1.2 : 1)).toFixed(2);
+      const effDmg = Math.round(lv.damage * (tower.buffTile === 'damage' ? 1.15 : 1));
 
-    const buffBadgeEl = this.$('tp-buff-badge');
-    if (buff) {
-      buffBadgeEl.textContent = `${buff.icon} ${buff.name} (${buff.shortLabel})`;
-      buffBadgeEl.classList.remove('hidden');
-    } else {
-      buffBadgeEl.classList.add('hidden');
+      const branchTag = tower.level === 3 && tower.branch ? ` · ${lv.icon}${lv.shortName}` : '';
+      this.elTpTitle.textContent = `${def.name} Lv.${tower.level}${branchTag}`;
+
+      if (buff) {
+        this.elTpBuffBadge.textContent = `${buff.icon} ${buff.name} (${buff.shortLabel})`;
+        this.elTpBuffBadge.classList.remove('hidden');
+      } else {
+        this.elTpBuffBadge.classList.add('hidden');
+      }
+
+      this.elTpStats.textContent = `射程 ${effRange} · 伤 ${effDmg} · ${effRate}/s`;
+
+      if (tower.level === 1) {
+        this.elTpUpgradeSingle.classList.remove('hidden');
+        this.elTpBranchGrid.classList.add('hidden');
+        this.elTpUpgrade.textContent = `升级 Lv.2 $${def.levels[1].cost}`;
+      } else if (tower.level === 2) {
+        this.elTpUpgradeSingle.classList.add('hidden');
+        this.elTpBranchGrid.classList.remove('hidden');
+        const brA = def.branches.A;
+        const brB = def.branches.B;
+        this.elTpBranchAName.textContent = `${brA.icon} ${brA.shortName}`;
+        this.elTpBranchACost.textContent = `$${brA.cost}`;
+        this.elTpBranchADesc.textContent = brA.desc;
+        this.elTpBranchBName.textContent = `${brB.icon} ${brB.shortName}`;
+        this.elTpBranchBCost.textContent = `$${brB.cost}`;
+        this.elTpBranchBDesc.textContent = brB.desc;
+      } else {
+        this.elTpUpgradeSingle.classList.remove('hidden');
+        this.elTpBranchGrid.classList.add('hidden');
+        this.elTpUpgrade.textContent = '已满级 Lv.3';
+      }
+
+      const pos = cellToPixel(tower.col, tower.row);
+      const left = Math.min(CANVAS_WIDTH - 290, Math.max(104, pos.x + 34));
+      const top = Math.min(410, Math.max(66, pos.y - 78));
+      if (this._popoverState.left !== left) {
+        this._popoverState.left = left;
+        this.elTowerPopover.style.left = `${left}px`;
+      }
+      if (this._popoverState.top !== top) {
+        this._popoverState.top = top;
+        this.elTowerPopover.style.top = `${top}px`;
+      }
     }
 
-    this.$('tp-stats').textContent = `射程 ${effRange} · 伤 ${effDmg} · ${effRate}/s`;
-
-    this.elTowerPopover.querySelectorAll('.tgt-btn').forEach((b) => {
-      b.classList.toggle('active', b.dataset.target === tower.targeting);
-    });
+    // Lightweight state-only dirty updates (zero DOM rebuilds)
+    if (structureChanged || this._popoverState.targeting !== tower.targeting) {
+      this._popoverState.targeting = tower.targeting;
+      for (const b of this.elTpTgtBtns) {
+        b.classList.toggle('active', b.dataset.target === tower.targeting);
+      }
+    }
 
     const gold = this.snapshot?.self?.gold || 0;
-    const singleWrap = this.$('tp-upgrade-single');
-    const branchGrid = this.$('tp-branch-grid');
-    const upgBtn = this.$('tp-upgrade');
-
     if (tower.level === 1) {
-      singleWrap.classList.remove('hidden');
-      branchGrid.classList.add('hidden');
-      const nextCost = def.levels[1].cost;
-      upgBtn.textContent = `升级 Lv.2 $${nextCost}`;
-      upgBtn.disabled = gold < nextCost;
+      const canAfford = gold >= def.levels[1].cost;
+      if (structureChanged || this._popoverState.canAfford !== canAfford) {
+        this._popoverState.canAfford = canAfford;
+        this.elTpUpgrade.disabled = !canAfford;
+      }
     } else if (tower.level === 2) {
-      singleWrap.classList.add('hidden');
-      branchGrid.classList.remove('hidden');
-      const brA = def.branches.A;
-      const brB = def.branches.B;
-      const btnA = this.$('tp-branch-a');
-      const btnB = this.$('tp-branch-b');
-      btnA.innerHTML = `<span class="bc-head"><span>${brA.icon} ${brA.shortName}</span><span class="bc-cost">$${brA.cost}</span></span><span class="bc-desc">${brA.desc}</span>`;
-      btnB.innerHTML = `<span class="bc-head"><span>${brB.icon} ${brB.shortName}</span><span class="bc-cost">$${brB.cost}</span></span><span class="bc-desc">${brB.desc}</span>`;
-      btnA.disabled = gold < brA.cost;
-      btnB.disabled = gold < brB.cost;
-    } else {
-      singleWrap.classList.remove('hidden');
-      branchGrid.classList.add('hidden');
-      upgBtn.textContent = '已满级 Lv.3';
-      upgBtn.disabled = true;
+      const canAffordA = gold >= def.branches.A.cost;
+      const canAffordB = gold >= def.branches.B.cost;
+      if (structureChanged || this._popoverState.canAffordA !== canAffordA) {
+        this._popoverState.canAffordA = canAffordA;
+        this.elTpBranchA.disabled = !canAffordA;
+      }
+      if (structureChanged || this._popoverState.canAffordB !== canAffordB) {
+        this._popoverState.canAffordB = canAffordB;
+        this.elTpBranchB.disabled = !canAffordB;
+      }
+    } else if (structureChanged || this._popoverState.canAfford !== false) {
+      this._popoverState.canAfford = false;
+      this.elTpUpgrade.disabled = true;
     }
 
     const refund = Math.round(tower.invested * SELL_REFUND_RATE);
-    this.$('tp-sell').textContent = `出售 +$${refund}`;
+    if (structureChanged || this._popoverState.refund !== refund) {
+      this._popoverState.refund = refund;
+      this.elTpSell.textContent = `出售 +$${refund}`;
+    }
 
-    const pos = cellToPixel(tower.col, tower.row);
-    const left = Math.min(CANVAS_WIDTH - 290, Math.max(104, pos.x + 34));
-    const top = Math.min(410, Math.max(66, pos.y - 78));
-    this.elTowerPopover.style.left = `${left}px`;
-    this.elTowerPopover.style.top = `${top}px`;
-    this.elTowerPopover.classList.remove('hidden');
+    if (this.elTowerPopover.classList.contains('hidden')) {
+      this.elTowerPopover.classList.remove('hidden');
+    }
   }
 
   showLobbyHome() {
     this.roomState = null;
     this.snapshot = null;
+    this._hudCache = {};
+    this._resetPopoverCache();
+    this._obsState = { key: null, canAfford: null, left: null, top: null };
     this.elLobbyOverlay.classList.remove('hidden');
     this.elLobbyEntry.classList.remove('hidden');
     this.elLobbyRoom.classList.add('hidden');
@@ -845,86 +981,139 @@ export class CandyUI {
   updateSnapshot(snap) {
     this.snapshot = snap;
     const { self, opponent } = snap;
+    const c = this._hudCache;
 
-    if (snap.mapId) {
-      this.$('hud-map-name').textContent = getMapDef(snap.mapId).name;
+    if (snap.mapId && c.mapId !== snap.mapId) {
+      c.mapId = snap.mapId;
+      this.elHudMapName.textContent = getMapDef(snap.mapId).name;
     }
 
-    this.$('hud-self-hp').textContent = `${self.hp}/20`;
-    this.$('hud-self-gold').textContent = `$${self.gold}`;
-    this.$('hud-self-eco').textContent = `Eco +${self.eco}/6s`;
+    if (c.selfHp !== self.hp) {
+      c.selfHp = self.hp;
+      this.elHudSelfHp.textContent = `${self.hp}/20`;
+    }
+    if (c.selfGold !== self.gold) {
+      c.selfGold = self.gold;
+      this.elHudSelfGold.textContent = `$${self.gold}`;
+    }
+    if (c.selfEco !== self.eco) {
+      c.selfEco = self.eco;
+      this.elHudSelfEco.textContent = `Eco +${self.eco}/6s`;
+    }
 
-    const ecoPct = Math.round(((ECO_PERIOD_TICKS - snap.ecoPayoutInTicks) / ECO_PERIOD_TICKS) * 100);
-    this.$('hud-eco-bar').style.width = `${Math.max(0, Math.min(100, ecoPct))}%`;
+    const ecoPct = Math.max(
+      0,
+      Math.min(100, Math.round(((ECO_PERIOD_TICKS - snap.ecoPayoutInTicks) / ECO_PERIOD_TICKS) * 100))
+    );
+    if (c.ecoPct !== ecoPct) {
+      c.ecoPct = ecoPct;
+      this.elHudEcoBar.style.width = `${ecoPct}%`;
+    }
 
     const nextSec = Math.ceil(snap.nextWaveInTicks / TICK_RATE);
-    const wavePill = this.$('hud-wave-pill');
-    if (snap.wave === 0) {
-      this.$('hud-wave-text').textContent = `开战准备 · ${nextSec}s`;
-      wavePill.classList.remove('overtime');
-      this.elOvertimeBanner.classList.add('hidden');
-    } else if (snap.wave <= MAX_MAIN_WAVES) {
-      this.$('hud-wave-text').textContent = `波次 ${snap.wave}/15 · ${nextSec}s`;
-      wavePill.classList.remove('overtime');
-      this.elOvertimeBanner.classList.add('hidden');
-    } else {
-      this.$('hud-wave-text').textContent = `🌈 狂暴加时 W${snap.wave} · ${nextSec}s`;
-      wavePill.classList.add('overtime');
-      this.$('overtime-wave-num').textContent = String(snap.wave);
-      this.elOvertimeBanner.classList.remove('hidden');
+    if (c.wave !== snap.wave || c.nextSec !== nextSec) {
+      c.wave = snap.wave;
+      c.nextSec = nextSec;
+      if (snap.wave === 0) {
+        this.elHudWaveText.textContent = `开战准备 · ${nextSec}s`;
+        this.elHudWavePill.classList.remove('overtime');
+        this.elOvertimeBanner.classList.add('hidden');
+      } else if (snap.wave <= MAX_MAIN_WAVES) {
+        this.elHudWaveText.textContent = `波次 ${snap.wave}/15 · ${nextSec}s`;
+        this.elHudWavePill.classList.remove('overtime');
+        this.elOvertimeBanner.classList.add('hidden');
+      } else {
+        this.elHudWaveText.textContent = `🌈 狂暴加时 W${snap.wave} · ${nextSec}s`;
+        this.elHudWavePill.classList.add('overtime');
+        this.elOvertimeWaveNum.textContent = String(snap.wave);
+        this.elOvertimeBanner.classList.remove('hidden');
+      }
     }
 
-    this.$('hud-opp-hp').textContent = String(opponent.hp);
-    this.$('hud-opp-eco').textContent = `+${opponent.eco}`;
-    const oppLamp = this.$('hud-opp-alert-lamp');
-    if (opponent.incomingAlerts && opponent.incomingAlerts.length > 0) {
-      oppLamp.textContent = `🚚 来袭×${opponent.incomingAlerts.length}`;
-      oppLamp.classList.add('active');
-    } else {
-      oppLamp.textContent = '🚚 待命';
-      oppLamp.classList.remove('active');
+    if (c.oppHp !== opponent.hp) {
+      c.oppHp = opponent.hp;
+      this.elHudOppHp.textContent = String(opponent.hp);
+    }
+    if (c.oppEco !== opponent.eco) {
+      c.oppEco = opponent.eco;
+      this.elHudOppEco.textContent = `+${opponent.eco}`;
+    }
+
+    const oppAlertCount = opponent.incomingAlerts ? opponent.incomingAlerts.length : 0;
+    if (c.oppAlertCount !== oppAlertCount) {
+      c.oppAlertCount = oppAlertCount;
+      if (oppAlertCount > 0) {
+        this.elHudOppAlertLamp.textContent = `🚚 来袭×${oppAlertCount}`;
+        this.elHudOppAlertLamp.classList.add('active');
+      } else {
+        this.elHudOppAlertLamp.textContent = '🚚 待命';
+        this.elHudOppAlertLamp.classList.remove('active');
+      }
     }
 
     if (self.outgoingAlerts && self.outgoingAlerts.length > 0) {
       const a = self.outgoingAlerts[0];
       const sec = Math.max(0, (a.arriveTick - snap.tick) / TICK_RATE).toFixed(1);
-      const label = SEND_DEFS[a.sendType]?.shortName || '快递';
-      this.elOutgoingPill.textContent = `已发出: ${label} (${sec}s)`;
-      this.elOutgoingPill.classList.remove('hidden');
-    } else {
+      const outKey = `${a.sendType}:${sec}`;
+      if (c.outKey !== outKey) {
+        c.outKey = outKey;
+        const label = SEND_DEFS[a.sendType]?.shortName || '快递';
+        this.elOutgoingPill.textContent = `已发出: ${label} (${sec}s)`;
+        this.elOutgoingPill.classList.remove('hidden');
+      }
+    } else if (c.outKey !== '') {
+      c.outKey = '';
       this.elOutgoingPill.classList.add('hidden');
     }
 
     // 2A: Incoming express alert banner explicitly displays 💚 暗黑奶妈车 / 🛡️ 终极铁王八
     if (self.incomingAlerts && self.incomingAlerts.length > 0) {
       const first = self.incomingAlerts[0];
-      const def = SEND_DEFS[first.sendType];
       const sec = Math.max(0, (first.arriveTick - snap.tick) / TICK_RATE).toFixed(1);
-      const countSuffix = self.incomingAlerts.length > 1 ? ` · 共 ${self.incomingAlerts.length} 辆排队` : '';
-      const label = def ? `${def.icon} ${def.name}` : '🚚 暗袭快递';
-      this.elExpressBanner.textContent = `${label} 即将抵达！(${sec}s${countSuffix})`;
-      this.elExpressBanner.classList.toggle('healer', first.sendType === 'express_healer');
-      this.elExpressBanner.classList.remove('hidden');
-    } else {
+      const inKey = `${first.sendType}:${sec}:${self.incomingAlerts.length}`;
+      if (c.inKey !== inKey) {
+        c.inKey = inKey;
+        const def = SEND_DEFS[first.sendType];
+        const countSuffix = self.incomingAlerts.length > 1 ? ` · 共 ${self.incomingAlerts.length} 辆排队` : '';
+        const label = def ? `${def.icon} ${def.name}` : '🚚 暗袭快递';
+        this.elExpressBanner.textContent = `${label} 即将抵达！(${sec}s${countSuffix})`;
+        this.elExpressBanner.classList.toggle('healer', first.sendType === 'express_healer');
+        this.elExpressBanner.classList.remove('hidden');
+      }
+    } else if (c.inKey !== '') {
+      c.inKey = '';
       this.elExpressBanner.classList.add('hidden');
     }
 
+    if (!c.towerAfford) c.towerAfford = {};
     for (const type of TOWER_ORDER) {
-      const btn = this.towerButtons[type];
-      const cost = TOWER_DEFS[type].levels[0].cost;
-      btn.classList.toggle('cant-afford', self.gold < cost);
+      const cantAfford = self.gold < TOWER_DEFS[type].levels[0].cost;
+      if (c.towerAfford[type] !== cantAfford) {
+        c.towerAfford[type] = cantAfford;
+        this.towerButtons[type].classList.toggle('cant-afford', cantAfford);
+      }
     }
 
+    if (!c.sendAfford) c.sendAfford = {};
+    if (!c.sendCd) c.sendCd = {};
     for (const type of SEND_ORDER) {
       const { btn, mask } = this.sendButtons[type];
       const def = SEND_DEFS[type];
+      const cantAfford = self.gold < def.cost;
+      if (c.sendAfford[type] !== cantAfford) {
+        c.sendAfford[type] = cantAfford;
+        btn.classList.toggle('cant-afford', cantAfford);
+      }
       const cdTicks = (self.sendCooldowns && self.sendCooldowns[type]) || 0;
-      btn.classList.toggle('cant-afford', self.gold < def.cost);
-      if (cdTicks > 0) {
-        mask.textContent = `${(cdTicks / TICK_RATE).toFixed(1)}s`;
-        mask.classList.remove('hidden');
-      } else {
-        mask.classList.add('hidden');
+      const cdText = cdTicks > 0 ? `${(cdTicks / TICK_RATE).toFixed(1)}s` : '';
+      if (c.sendCd[type] !== cdText) {
+        c.sendCd[type] = cdText;
+        if (cdText) {
+          mask.textContent = cdText;
+          mask.classList.remove('hidden');
+        } else {
+          mask.classList.add('hidden');
+        }
       }
     }
 
@@ -948,8 +1137,17 @@ export class CandyUI {
     }
 
     if (snap.phase === 'ENDED' && snap.endedResult) {
-      this._renderEndedResult(snap.endedResult);
+      this.renderEndedResult(snap.endedResult);
+    } else {
+      c.endedPhase = snap.phase;
     }
+  }
+
+  renderEndedResult(res) {
+    if (!res) return;
+    if (this._hudCache.endedPhase === 'ENDED') return;
+    this._hudCache.endedPhase = 'ENDED';
+    this._renderEndedResult(res);
   }
 
   _renderEndedResult(res) {
@@ -997,6 +1195,8 @@ export class CandyUI {
       `Render: ${this.renderer.renderMs.toFixed(2)} ms`,
       `RTT: ${this.net.rttMs} ms`,
       `ServerTick: ${this.net.serverTickMs} ms`,
+      `WS KB/s: ${this.net.getWsKbps().toFixed(1)}`,
+      `SkipSnap: ${this.net.skippedSnapshots || 0}`,
       `DPR: ${this.renderer.dpr}`,
       `Entities(怪/弹/粒): ${creeps}/${projs}/${parts}`
     ].join('<br/>');

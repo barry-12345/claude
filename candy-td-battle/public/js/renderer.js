@@ -46,6 +46,7 @@ export class CandyRenderer {
     this.towerBaseSprites = new Map();
     this.obstacleSprites = new Map();
     this.buffTileSprites = new Map();
+    this.shieldBadgeSprites = new Map();
 
     // Fixed-cap circular pools (no GC spikes)
     this.particles = Array.from({ length: PARTICLE_POOL_MAX }, () => ({ active: false }));
@@ -65,6 +66,9 @@ export class CandyRenderer {
     this.prevSnapshot = null;
     this.currSnapshot = null;
     this.lastSnapTime = performance.now();
+    this._prevCreepMap = new Map();
+    this._selfClearedSet = new Set();
+    this._oppClearedSet = new Set();
 
     // Locked Dual-Side View camera state
     this.viewMode = 'self';
@@ -88,6 +92,7 @@ export class CandyRenderer {
     this._ensureStaticMapCache(this.mapId);
     this._buildTowerBaseSprites();
     this._buildObstacleAndBuffSprites();
+    this._buildShieldBadgeSprites();
   }
 
   resize() {
@@ -100,6 +105,7 @@ export class CandyRenderer {
       this._ensureStaticMapCache(this.mapId, true);
       this._buildTowerBaseSprites();
       this._buildObstacleAndBuffSprites();
+      this._buildShieldBadgeSprites();
     }
   }
 
@@ -488,6 +494,42 @@ export class CandyRenderer {
     }
   }
 
+  _buildShieldBadgeSprites() {
+    this.shieldBadgeSprites.clear();
+    for (let n = 1; n <= 16; n++) {
+      const w = 24;
+      const h = 12;
+      const { canvas, ctx } = this._createOffscreen(w, h);
+      ctx.fillStyle = '#1462B8';
+      this._roundRect(ctx, 0, 0, w, h, 5);
+      ctx.fill();
+      // Small vector diamond shield emblem on left
+      ctx.fillStyle = '#6CE0FF';
+      ctx.beginPath();
+      ctx.moveTo(6, 2.5);
+      ctx.lineTo(9, 4.5);
+      ctx.lineTo(8, 8.5);
+      ctx.lineTo(6, 9.8);
+      ctx.lineTo(4, 8.5);
+      ctx.lineTo(3, 4.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(n), 15.5, 6.2);
+      this.shieldBadgeSprites.set(n, canvas);
+    }
+  }
+
+  _pushCapped(list, item, cap) {
+    if (list.length >= cap) {
+      list.shift();
+    }
+    list.push(item);
+  }
+
   setPlayerSlot(slot) {
     this.mySlot = Number(slot) || 0;
   }
@@ -499,6 +541,9 @@ export class CandyRenderer {
   resetMatchState() {
     this.prevSnapshot = null;
     this.currSnapshot = null;
+    this._prevCreepMap.clear();
+    this._selfClearedSet.clear();
+    this._oppClearedSet.clear();
     this.lasers = [];
     this.splashRings = [];
     for (let i = 0; i < PARTICLE_POOL_MAX; i++) this.particles[i].active = false;
@@ -518,6 +563,20 @@ export class CandyRenderer {
   pushSnapshot(snap) {
     if (snap.mapId && snap.mapId !== this.mapId) {
       this.setMapId(snap.mapId);
+    }
+    if (snap.opponentLite && snap.opponent) {
+      const prevOpp = this.currSnapshot?.opponent;
+      snap.opponent.creeps = prevOpp?.creeps || [];
+      snap.opponent.projectiles = prevOpp?.projectiles || [];
+      snap.opponent.lavaZones = prevOpp?.lavaZones || [];
+    }
+    this._selfClearedSet.clear();
+    for (const k of snap.self?.clearedObstacles || []) {
+      this._selfClearedSet.add(k);
+    }
+    this._oppClearedSet.clear();
+    for (const k of snap.opponent?.clearedObstacles || []) {
+      this._oppClearedSet.add(k);
     }
     this.prevSnapshot = this.currSnapshot || snap;
     this.currSnapshot = snap;
@@ -565,40 +624,44 @@ export class CandyRenderer {
         this.spawnFloatText(ev.x, ev.y - 18, '💥 破盾!', '#1F7AE0', 0.9, 13, side);
       } else if (ev.type === 'frost_nova') {
         const side = this._sideForSlot(ev.slot);
-        this.splashRings.push({ x: ev.x, y: ev.y, r: ev.range, color: '#64E9FF', side, life: 1 });
+        this._pushCapped(this.splashRings, { x: ev.x, y: ev.y, r: ev.range, color: '#64E9FF', side, life: 1 }, 40);
         this._burstParticles(ev.x, ev.y, '#9EF8FF', 16, 85, side);
       } else if (ev.type === 'brittle_shatter') {
         const side = this._sideForSlot(ev.slot);
-        this.splashRings.push({ x: ev.x, y: ev.y, r: ev.radius, color: '#A58BF5', side, life: 1 });
+        this._pushCapped(this.splashRings, { x: ev.x, y: ev.y, r: ev.radius, color: '#A58BF5', side, life: 1 }, 40);
         this._burstParticles(ev.x, ev.y, '#C2A8FF', 14, 80, side);
       } else if (ev.type === 'healer_pulse') {
         const side = this._sideForSlot(ev.slot);
-        this.splashRings.push({ x: ev.x, y: ev.y, r: ev.radius, color: '#39FF9C', side, life: 1 });
+        this._pushCapped(this.splashRings, { x: ev.x, y: ev.y, r: ev.radius, color: '#39FF9C', side, life: 1 }, 40);
       } else if (ev.type === 'life_lost') {
         const side = this._sideForSlot(ev.slot);
         this._burstParticles(ev.x, ev.y, '#FF4D6D', 14, 75, side);
         this.spawnFloatText(ev.x - 10, ev.y - 24, `-${ev.amount} ❤️`, '#D9264E', 1.2, 16, side);
       } else if (ev.type === 'tower_shot' && ev.towerType === 'lemon') {
         const side = this._sideForSlot(ev.slot);
-        this.lasers.push({
-          fromX: ev.fromX,
-          fromY: ev.fromY,
-          toX: ev.beamEndX || ev.toX,
-          toY: ev.beamEndY || ev.toY,
-          branch: ev.branch || null,
-          side,
-          life: 1.0
-        });
+        this._pushCapped(
+          this.lasers,
+          {
+            fromX: ev.fromX,
+            fromY: ev.fromY,
+            toX: ev.beamEndX || ev.toX,
+            toY: ev.beamEndY || ev.toY,
+            branch: ev.branch || null,
+            side,
+            life: 1.0
+          },
+          32
+        );
         if (ev.armoredHit) {
           this._burstParticles(ev.toX, ev.toY, '#FFD147', 8, 60, side);
         }
       } else if (ev.type === 'mint_splash') {
         const side = this._sideForSlot(ev.slot);
-        this.splashRings.push({ x: ev.x, y: ev.y, r: ev.radius, color: '#38C6B4', side, life: 1 });
+        this._pushCapped(this.splashRings, { x: ev.x, y: ev.y, r: ev.radius, color: '#38C6B4', side, life: 1 }, 40);
         this._burstParticles(ev.x, ev.y, '#88F2E6', 6, 45, side);
       } else if (ev.type === 'popcorn_boom') {
         const side = this._sideForSlot(ev.slot);
-        this.splashRings.push({ x: ev.x, y: ev.y, r: ev.radius, color: '#FF944D', side, life: 1 });
+        this._pushCapped(this.splashRings, { x: ev.x, y: ev.y, r: ev.radius, color: '#FF944D', side, life: 1 }, 40);
         this._burstParticles(ev.x, ev.y, '#FFB84D', 10, 75, side);
       } else if (ev.type === 'creep_pop') {
         const side = this._sideForSlot(ev.slot);
@@ -754,7 +817,7 @@ export class CandyRenderer {
     ctx.drawImage(this.mapCache, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     // Dynamic Obstacles (1B buff badges) & Cleared Buff Tiles
-    const clearedSet = new Set(side.clearedObstacles || []);
+    const clearedSet = isSelf ? this._selfClearedSet : this._oppClearedSet;
     this._drawObstaclesAndBuffs(ctx, clearedSet);
 
     // Selected obstacle highlight
@@ -763,29 +826,28 @@ export class CandyRenderer {
       if (Number.isInteger(sc) && Number.isInteger(sr)) {
         const ox = GRID_X0 + sc * CELL_W;
         const oy = GRID_Y0 + sr * CELL_H;
-        ctx.save();
         ctx.strokeStyle = '#FFD147';
         ctx.lineWidth = 3;
         ctx.strokeRect(ox + 2, oy + 2, CELL_W - 4, CELL_H - 4);
-        ctx.restore();
       }
     }
 
     // Caramel Lava Zones
-    for (const z of side.lavaZones || []) {
-      const fade = Math.min(1, z.remainTicks / 15);
-      const pulse = 1 + 0.04 * Math.sin(nowMs * 0.008 + z.id);
-      ctx.save();
-      ctx.globalAlpha = 0.42 * fade;
-      ctx.fillStyle = '#FF7A2F';
-      ctx.beginPath();
-      ctx.arc(z.x, z.y, z.radius * pulse, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 0.7 * fade;
-      ctx.strokeStyle = '#FFD147';
+    if (side.lavaZones && side.lavaZones.length > 0) {
       ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.restore();
+      ctx.strokeStyle = '#FFD147';
+      ctx.fillStyle = '#FF7A2F';
+      for (const z of side.lavaZones) {
+        const fade = Math.min(1, z.remainTicks / 15);
+        const pulse = 1 + 0.04 * Math.sin(nowMs * 0.008 + z.id);
+        ctx.beginPath();
+        ctx.arc(z.x, z.y, z.radius * pulse, 0, Math.PI * 2);
+        ctx.globalAlpha = 0.42 * fade;
+        ctx.fill();
+        ctx.globalAlpha = 0.7 * fade;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
     }
 
     // Placement hover preview (only on self when not peeking)
@@ -871,7 +933,8 @@ export class CandyRenderer {
     }
 
     // Creeps (interpolated)
-    const prevMap = new Map();
+    const prevMap = this._prevCreepMap;
+    prevMap.clear();
     if (prevSide && prevSide.creeps) {
       for (const pc of prevSide.creeps) prevMap.set(pc.id, pc);
     }
@@ -1291,13 +1354,18 @@ export class CandyRenderer {
     }
 
     if (c.shieldHits > 0) {
-      ctx.fillStyle = '#1462B8';
-      this._roundRect(ctx, -11, barY - 13, 22, 11, 5);
-      ctx.fill();
-      ctx.fillStyle = '#D6F3FF';
-      ctx.font = 'bold 9px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`🛡${c.shieldHits}`, 0, barY - 4.5);
+      const badge = this.shieldBadgeSprites.get(c.shieldHits);
+      if (badge) {
+        ctx.drawImage(badge, -12, barY - 14, 24, 12);
+      } else {
+        ctx.fillStyle = '#1462B8';
+        this._roundRect(ctx, -11, barY - 13, 22, 11, 5);
+        ctx.fill();
+        ctx.fillStyle = '#D6F3FF';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`S${c.shieldHits}`, 0, barY - 4.5);
+      }
     }
 
     ctx.restore();
@@ -1320,7 +1388,6 @@ export class CandyRenderer {
   }
 
   _drawProjectile(ctx, p) {
-    ctx.save();
     if (p.type === 'strawberry') {
       ctx.fillStyle = p.isSecondary ? '#C97BFF' : p.branch === 'A' ? '#FF385C' : '#FF6B8B';
       ctx.beginPath();
@@ -1352,7 +1419,6 @@ export class CandyRenderer {
       ctx.lineWidth = 1.8;
       ctx.stroke();
     }
-    ctx.restore();
   }
 
   // 2A: Express Truck displays explicit 💚 奶妈车 or 🛡️ 铁王八 icon
@@ -1454,11 +1520,9 @@ export class CandyRenderer {
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.globalAlpha = 1;
 
     for (const l of this.lasers) {
       if (l.side !== side) continue;
-      ctx.save();
       ctx.globalAlpha = l.life;
       ctx.strokeStyle = l.branch === 'A' ? '#38B6FF' : l.branch === 'B' ? '#FF385C' : '#FFD147';
       ctx.lineWidth = l.branch ? 5 : 4;
@@ -1469,19 +1533,16 @@ export class CandyRenderer {
       ctx.strokeStyle = '#FFFFFF';
       ctx.lineWidth = 1.6;
       ctx.stroke();
-      ctx.restore();
     }
 
+    ctx.lineWidth = 3;
     for (const s of this.splashRings) {
       if (s.side !== side) continue;
-      ctx.save();
       ctx.globalAlpha = s.life * 0.55;
       ctx.strokeStyle = s.color;
-      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r * (1 - s.life * 0.35), 0, Math.PI * 2);
       ctx.stroke();
-      ctx.restore();
     }
 
     ctx.textAlign = 'center';
@@ -1490,9 +1551,8 @@ export class CandyRenderer {
       if (!ft.active || ft.side !== side) continue;
       ctx.globalAlpha = Math.min(1, (ft.life / ft.maxLife) * 1.4);
       ctx.font = `800 ${ft.fontSize}px sans-serif`;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.strokeText(ft.text, ft.x, ft.y);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillText(ft.text, ft.x + 1, ft.y + 1);
       ctx.fillStyle = ft.color;
       ctx.fillText(ft.text, ft.x, ft.y);
     }

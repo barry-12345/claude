@@ -1,0 +1,95 @@
+{
+  "port": 4502,
+  "prodPort": 4503,
+  "outDir": "G:\\我的云端硬盘\\游戏\\candy-td-battle\\docs\\review\\v2.1\\evidence\\round-2\\tester",
+  "ac01": {
+    "passedCount": 8,
+    "results": [
+      {
+        "type": "strawberry",
+        "branch": "A",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      },
+      {
+        "type": "strawberry",
+        "branch": "B",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      },
+      {
+        "type": "mint",
+        "branch": "A",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      },
+      {
+        "type": "mint",
+        "branch": "B",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      },
+      {
+        "type": "popcorn",
+        "branch": "A",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      },
+      {
+        "type": "popcorn",
+        "branch": "B",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      },
+      {
+        "type": "lemon",
+        "branch": "A",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      },
+      {
+        "type": "lemon",
+        "branch": "B",
+        "sameNodeAfter125msHold": true,
+        "upgraded": true
+      }
+    ]
+  },
+  "ac02": {
+    "dpr": 2,
+    "avgFps": 59.9,
+    "minFps": 58,
+    "avgRenderMs": 1.23,
+    "maxRenderMs": 1.8,
+    "maxServerTickMs": 0.41,
+    "avgWsKbps": 496.5,
+    "towersBefore": 25,
+    "towersPlacedLive": 3,
+    "buildLatenciesMs": [
+      105,
+      49,
+      67
+    ],
+    "netDebugText": "FPS: 60\nRender: 1.00 ms\nRTT: 2 ms\nServerTick: 0.16 ms\nWS KB/s: 430.9\nSkipSnap: 0\nDPR: 2\nEntities(怪/弹/粒): 94/18/132"
+  },
+  "ac04": {
+    "offlineToasts": [
+      "网络连接已断开，正在尝试自动重连...",
+      "连接已断开，正在自动重连，请稍候再试..."
+    ],
+    "reconnectedAndBuilt": true
+  },
+  "ac05": {
+    "maxLasers": 3,
+    "maxSplashRings": 17,
+    "maxParticles": 220,
+    "maxFloatTexts": 18
+  },
+  "ac08": {
+    "testHookUndefined": true,
+    "lv3UpgradedTitle": "草莓豆豆炮 Lv.3 · 🔥加特林",
+    "finalGold": "$3"
+  },
+  "consoleErrors": [],
+  "pageErrors": []
+}

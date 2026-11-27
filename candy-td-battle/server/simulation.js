@@ -583,7 +583,9 @@ export class GameSimulation {
           let hitPools = 0;
           let bestPoolBuff = null;
           for (const z of player.lavaZones) {
-            if (Math.hypot(creep.x - z.x, creep.y - z.y) <= z.radius) {
+            const dx = creep.x - z.x;
+            const dy = creep.y - z.y;
+            if (dx * dx + dy * dy <= z.radius * z.radius) {
               hitPools += 1;
               if (z.towerBuff === 'bounty') bestPoolBuff = 'bounty';
               if (hitPools >= 2) break; // max 2 overlapping lava pools
@@ -611,11 +613,14 @@ export class GameSimulation {
           creep.healCooldownTicks -= 1;
           if (creep.healCooldownTicks <= 0) {
             const hDef = CREEP_DEFS.dark_healer;
+            const healRadiusSq = hDef.healRadius * hDef.healRadius;
             creep.healCooldownTicks = hDef.healPeriodTicks;
             creep.healPulseTicks = 12;
             for (const ally of player.creeps) {
               if (ally.hp <= 0.0001) continue;
-              if (Math.hypot(ally.x - creep.x, ally.y - creep.y) <= hDef.healRadius) {
+              const dx = ally.x - creep.x;
+              const dy = ally.y - creep.y;
+              if (dx * dx + dy * dy <= healRadiusSq) {
                 const pct = ally.id !== creep.id && ally.isBoss ? hDef.healPctBoss : hDef.healPctNormal;
                 ally.hp = Math.min(ally.maxHp, ally.hp + ally.maxHp * pct);
               }
@@ -780,16 +785,21 @@ export class GameSimulation {
   _acquireTarget(tower, range, creeps) {
     let best = null;
     let bestScore = -Infinity;
+    const rangeSq = range * range;
+    const isClose = tower.targeting === 'close';
+    const isStrong = tower.targeting === 'strong';
     for (const c of creeps) {
       if (c.hp <= 0.0001) continue;
-      const dist = Math.hypot(c.x - tower.x, c.y - tower.y);
-      if (dist > range) continue;
+      const dx = c.x - tower.x;
+      const dy = c.y - tower.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq > rangeSq) continue;
 
       let score;
-      if (tower.targeting === 'strong') {
+      if (isStrong) {
         score = c.hp * 1000 + c.progress;
-      } else if (tower.targeting === 'close') {
-        score = -dist * 1000 + c.progress;
+      } else if (isClose) {
+        score = -Math.sqrt(distSq) * 1000 + c.progress;
       } else {
         score = c.progress;
       }
@@ -1005,9 +1015,12 @@ export class GameSimulation {
       tower.branch === 'A' &&
       tower.shotCount % lvDef.novaEvery === 0
     ) {
+      const novaRangeSq = eff.range * eff.range;
       for (const c of player.creeps) {
         if (c.hp <= 0.0001) continue;
-        if (Math.hypot(c.x - tower.x, c.y - tower.y) > eff.range) continue;
+        const dx = c.x - tower.x;
+        const dy = c.y - tower.y;
+        if (dx * dx + dy * dy > novaRangeSq) continue;
         if (c.ccImmuneBeforeProgress > 0 && c.progress < c.ccImmuneBeforeProgress) continue;
         if (c.freezeTicks > 0 || c.freezeImmuneTicks > 0) continue;
         c.freezeTicks = c.isBoss || c.slowResist > 0 ? lvDef.bossFreezeTicks : lvDef.freezeTicks;
@@ -1069,13 +1082,20 @@ export class GameSimulation {
   }
 
   _stepProjectiles(player) {
+    const creepById = new Map();
+    for (const c of player.creeps) {
+      if (c.hp > 0.0001) {
+        creepById.set(c.id, c);
+      }
+    }
+
     const current = player.projectiles;
     player.projectiles = [];
     const remaining = [];
     for (const proj of current) {
       if (proj.targetId && (!proj.isSecondary || proj.type === 'strawberry')) {
-        const liveTarget = player.creeps.find((c) => c.id === proj.targetId && c.hp > 0.0001);
-        if (liveTarget) {
+        const liveTarget = creepById.get(proj.targetId);
+        if (liveTarget && liveTarget.hp > 0.0001) {
           proj.targetX = liveTarget.x;
           proj.targetY = liveTarget.y;
         }
@@ -1083,17 +1103,19 @@ export class GameSimulation {
 
       const dx = proj.targetX - proj.x;
       const dy = proj.targetY - proj.y;
-      const dist = Math.hypot(dx, dy);
+      const dist = Math.sqrt(dx * dx + dy * dy);
       const stepDist = proj.speed / TICK_RATE;
 
       if (dist <= stepDist || dist < 4) {
         proj.x = proj.targetX;
         proj.y = proj.targetY;
-        this._resolveProjectileHit(player, proj);
+        this._resolveProjectileHit(player, proj, creepById);
       } else {
         proj.x += (dx / dist) * stepDist;
         proj.y += (dy / dist) * stepDist;
-        const totalDist = Math.max(1, Math.hypot(proj.targetX - proj.sourceX, proj.targetY - proj.sourceY));
+        const sdx = proj.targetX - proj.sourceX;
+        const sdy = proj.targetY - proj.sourceY;
+        const totalDist = Math.max(1, Math.sqrt(sdx * sdx + sdy * sdy));
         proj.progress = Math.min(1, 1 - dist / totalDist);
         remaining.push(proj);
       }
@@ -1101,13 +1123,15 @@ export class GameSimulation {
     player.projectiles = remaining.concat(player.projectiles);
   }
 
-  _resolveProjectileHit(player, proj) {
+  _resolveProjectileHit(player, proj, creepById = null) {
     const lvDef = getTowerLevelDef(proj.type, proj.level, proj.branch);
     if (!lvDef) return;
 
     if (proj.type === 'strawberry') {
-      const target = player.creeps.find((c) => c.id === proj.targetId && c.hp > 0.0001);
-      if (target) {
+      const target = creepById
+        ? creepById.get(proj.targetId)
+        : player.creeps.find((c) => c.id === proj.targetId);
+      if (target && target.hp > 0.0001) {
         this._applyDamageToCreep(player, 'strawberry', lvDef, target, proj.damage, {
           tileDmgMult: proj.tileDmgMult,
           specialMult: proj.specialMult,
@@ -1118,12 +1142,14 @@ export class GameSimulation {
       // Strawberry-B Shredder: split 2 shrapnel at 1 nearby different target
       if (!proj.isSecondary && proj.level === 3 && proj.branch === 'B' && lvDef.splitCount > 0) {
         let bestAlt = null;
-        let bestDist = Infinity;
+        let bestDistSq = 150 * 150;
         for (const c of player.creeps) {
           if (c.hp <= 0.0001 || c.id === proj.targetId) continue;
-          const d = Math.hypot(c.x - proj.x, c.y - proj.y);
-          if (d <= 150 && d < bestDist) {
-            bestDist = d;
+          const dx = c.x - proj.x;
+          const dy = c.y - proj.y;
+          const dSq = dx * dx + dy * dy;
+          if (dSq <= bestDistSq) {
+            bestDistSq = dSq;
             bestAlt = c;
           }
         }
@@ -1161,10 +1187,12 @@ export class GameSimulation {
 
     if (proj.type === 'mint' || proj.type === 'popcorn') {
       const radius = proj.isSecondary ? proj.bounceRadius || 55 : proj.splashRadius;
+      const radiusSq = radius * radius;
       for (const c of player.creeps) {
         if (c.hp <= 0.0001) continue;
-        const d = Math.hypot(c.x - proj.x, c.y - proj.y);
-        if (d <= radius) {
+        const dx = c.x - proj.x;
+        const dy = c.y - proj.y;
+        if (dx * dx + dy * dy <= radiusSq) {
           this._applyDamageToCreep(player, proj.type, lvDef, c, proj.damage, {
             tileDmgMult: proj.tileDmgMult,
             specialMult: proj.specialMult,
@@ -1206,9 +1234,17 @@ export class GameSimulation {
         proj.branch === 'B' &&
         proj.bounceCount > 0
       ) {
-        const nearby = player.creeps
-          .filter((c) => c.hp > 0.0001 && Math.hypot(c.x - proj.x, c.y - proj.y) <= 150)
-          .slice(0, proj.bounceCount);
+        const bounceRangeSq = 150 * 150;
+        const nearby = [];
+        for (const c of player.creeps) {
+          if (c.hp <= 0.0001) continue;
+          const dx = c.x - proj.x;
+          const dy = c.y - proj.y;
+          if (dx * dx + dy * dy <= bounceRangeSq) {
+            nearby.push(c);
+            if (nearby.length >= proj.bounceCount) break;
+          }
+        }
         for (let i = 0; i < proj.bounceCount; i++) {
           const angle = (Math.PI * 2 * i) / proj.bounceCount + this.rng() * 0.4;
           const fallbackX = proj.x + Math.cos(angle) * 48;
@@ -1280,10 +1316,13 @@ export class GameSimulation {
 
         if (c.brittleMark) {
           const shatterDef = TOWER_DEFS.mint.branches.B;
+          const shatterRadiusSq = shatterDef.shatterRadius * shatterDef.shatterRadius;
           const rawShatter = c.maxHp * shatterDef.shatterPct;
           for (const other of player.creeps) {
             if (other.hp <= 0.0001) continue;
-            if (Math.hypot(other.x - c.x, other.y - c.y) <= shatterDef.shatterRadius) {
+            const dx = other.x - c.x;
+            const dy = other.y - c.y;
+            if (dx * dx + dy * dy <= shatterRadiusSq) {
               if (other.shieldHits > 0) {
                 other.shieldHits -= 1;
                 this.emitEvent('all', {
@@ -1332,10 +1371,7 @@ export class GameSimulation {
     return w;
   }
 
-  spawnStress({ towers = 15, creeps = 45 } = {}) {
-    const p0 = this.players[0];
-    const towerCount = Math.min(40, Math.max(0, Math.floor(towers)));
-    const creepCount = Math.min(120, Math.max(0, Math.floor(creeps)));
+  _populateStressSide(player, towerCount, creepCount) {
     const combos = [];
     for (const type of TOWER_ORDER) {
       combos.push({ type, branch: 'A' });
@@ -1345,21 +1381,21 @@ export class GameSimulation {
     let placed = 0;
     for (let col = 0; col < GRID_COLS && placed < towerCount; col++) {
       for (let row = 0; row < GRID_ROWS && placed < towerCount; row++) {
-        if (!isBuildableCell(this.mapId, col, row, p0.clearedObstacles)) continue;
+        if (!isBuildableCell(this.mapId, col, row, player.clearedObstacles)) continue;
         const key = cellKey(col, row);
-        if (p0.occupiedCells.has(key)) continue;
+        if (player.occupiedCells.has(key)) continue;
         const { type, branch } = combos[placed % combos.length];
         const def = TOWER_DEFS[type];
         const lv3 = def.branches[branch];
         const pos = cellToPixel(col, row);
-        p0.towers.push({
+        player.towers.push({
           id: this.allocId(),
           type,
           col,
           row,
           level: 3,
           branch,
-          buffTile: getBuffAt(this.mapId, col, row, p0.clearedObstacles),
+          buffTile: getBuffAt(this.mapId, col, row, player.clearedObstacles),
           invested: lv3.totalCost,
           targeting: def.defaultTargeting,
           angle: 0,
@@ -1371,7 +1407,7 @@ export class GameSimulation {
           x: pos.x,
           y: pos.y
         });
-        p0.occupiedCells.add(key);
+        player.occupiedCells.add(key);
         placed += 1;
       }
     }
@@ -1391,7 +1427,7 @@ export class GameSimulation {
     for (let i = 0; i < creepCount; i++) {
       const cType = creepTypes[i % creepTypes.length];
       const def = CREEP_DEFS[cType];
-      const creep = this._spawnCreep(p0, {
+      const creep = this._spawnCreep(player, {
         type: cType,
         hpScale: 1.8,
         speedScale: 1,
@@ -1410,7 +1446,7 @@ export class GameSimulation {
     // Spawn 2 caramel lava pools on path for rendering stress test
     for (const prog of [0.22, 0.52]) {
       const lp = getPositionAtProgress(this.mapId, prog);
-      p0.lavaZones.push({
+      player.lavaZones.push({
         id: this.allocId(),
         x: lp.x,
         y: lp.y,
@@ -1420,29 +1456,39 @@ export class GameSimulation {
       });
     }
 
-    return { placedTowers: placed, spawnedCreeps: creepCount, lavaZones: p0.lavaZones.length };
+    return placed;
   }
 
-  _serializePlayerForViewer(player, isSelf) {
-    const cooldowns = {};
-    if (isSelf) {
-      for (const key of SEND_ORDER) {
-        cooldowns[key] = Math.max(0, (player.sendCooldowns[key] || 0) - this.tick);
-      }
+  spawnStress({ towers = 15, creeps = 45, bothSides = false, oppTowers, oppCreeps } = {}) {
+    const towerCount = Math.min(40, Math.max(0, Math.floor(towers)));
+    const creepCount = Math.min(120, Math.max(0, Math.floor(creeps)));
+    const placed = this._populateStressSide(this.players[0], towerCount, creepCount);
+
+    let oppPlaced = 0;
+    let oppSpawned = 0;
+    if (bothSides) {
+      const oppTC = Math.min(40, Math.max(0, Math.floor(oppTowers !== undefined ? oppTowers : towerCount)));
+      const oppCC = Math.min(120, Math.max(0, Math.floor(oppCreeps !== undefined ? oppCreeps : creepCount)));
+      oppPlaced = this._populateStressSide(this.players[1], oppTC, oppCC);
+      oppSpawned = oppCC;
     }
 
+    return {
+      placedTowers: placed,
+      spawnedCreeps: creepCount,
+      lavaZones: this.players[0].lavaZones.length,
+      bothSides: Boolean(bothSides),
+      oppPlacedTowers: oppPlaced,
+      oppSpawnedCreeps: oppSpawned
+    };
+  }
+
+  _serializePlayerForViewer(player, isSelf, { lite = false } = {}) {
     const base = {
       hp: player.hp,
       gold: player.gold,
       eco: player.eco,
       clearedObstacles: Array.from(player.clearedObstacles),
-      lavaZones: player.lavaZones.map((z) => ({
-        id: z.id,
-        x: Number(z.x.toFixed(1)),
-        y: Number(z.y.toFixed(1)),
-        radius: z.radius,
-        remainTicks: z.remainTicks
-      })),
       towers: player.towers.map((t) => ({
         id: t.id,
         type: t.type,
@@ -1456,7 +1502,24 @@ export class GameSimulation {
         angle: Number(t.angle.toFixed(3)),
         recoil: Number((t.recoil || 0).toFixed(2))
       })),
-      creeps: player.creeps.map((c) => ({
+      // Decision 2A: express alerts expose sendType directly so defender sees 💚 / 🛡️ icon
+      incomingAlerts: player.incomingAlerts.map((a) => ({
+        id: a.id,
+        sendType: a.sendType,
+        arriveTick: a.arriveTick,
+        totalTicks: a.totalTicks
+      }))
+    };
+
+    if (!lite) {
+      base.lavaZones = player.lavaZones.map((z) => ({
+        id: z.id,
+        x: Number(z.x.toFixed(1)),
+        y: Number(z.y.toFixed(1)),
+        radius: z.radius,
+        remainTicks: z.remainTicks
+      }));
+      base.creeps = player.creeps.map((c) => ({
         id: c.id,
         type: c.type,
         hp: Math.round(c.hp * 10) / 10,
@@ -1480,8 +1543,8 @@ export class GameSimulation {
         x: Number(c.x.toFixed(1)),
         y: Number(c.y.toFixed(1)),
         angle: Number(c.angle.toFixed(3))
-      })),
-      projectiles: player.projectiles.map((p) => ({
+      }));
+      base.projectiles = player.projectiles.map((p) => ({
         id: p.id,
         type: p.type,
         level: p.level,
@@ -1494,17 +1557,14 @@ export class GameSimulation {
         targetY: Number(p.targetY.toFixed(1)),
         progress: Number(p.progress.toFixed(3)),
         isSecondary: p.isSecondary
-      })),
-      // Decision 2A: express alerts expose sendType directly so defender sees 💚 / 🛡️ icon
-      incomingAlerts: player.incomingAlerts.map((a) => ({
-        id: a.id,
-        sendType: a.sendType,
-        arriveTick: a.arriveTick,
-        totalTicks: a.totalTicks
-      }))
-    };
+      }));
+    }
 
     if (isSelf) {
+      const cooldowns = {};
+      for (const key of SEND_ORDER) {
+        cooldowns[key] = Math.max(0, (player.sendCooldowns[key] || 0) - this.tick);
+      }
       base.sendCooldowns = cooldowns;
       base.outgoingAlerts = player.outgoingAlerts.map((a) => ({
         id: a.id,
@@ -1517,12 +1577,12 @@ export class GameSimulation {
     return base;
   }
 
-  getClientSnapshot(viewerSlot, roomPhaseOverride = null) {
+  getClientSnapshot(viewerSlot, roomPhaseOverride = null, { opponentLite = false } = {}) {
     const selfPlayer = this.players[viewerSlot];
     const oppPlayer = this.players[1 - viewerSlot];
     const ecoRem = ECO_PERIOD_TICKS - (this.tick % ECO_PERIOD_TICKS);
 
-    return {
+    const snap = {
       type: 'game_snapshot',
       mapId: this.mapId,
       tick: this.tick,
@@ -1531,10 +1591,14 @@ export class GameSimulation {
       isOvertime: this.wave > MAX_MAIN_WAVES,
       nextWaveInTicks: Math.max(0, this.nextWaveTick - this.tick),
       ecoPayoutInTicks: ecoRem === 0 ? ECO_PERIOD_TICKS : ecoRem,
-      self: this._serializePlayerForViewer(selfPlayer, true),
-      opponent: this._serializePlayerForViewer(oppPlayer, false),
+      self: this._serializePlayerForViewer(selfPlayer, true, { lite: false }),
+      opponent: this._serializePlayerForViewer(oppPlayer, false, { lite: Boolean(opponentLite) }),
       endedResult: this.endedResult
     };
+    if (opponentLite) {
+      snap.opponentLite = true;
+    }
+    return snap;
   }
 
   // Test-only full snapshot (only accessible when CANDY_ALLOW_TEST_HOOKS=1)

@@ -13,6 +13,22 @@ import {
 import { GameSimulation } from './simulation.js';
 import { CandyAIBot } from './ai-bot.js';
 
+const NON_CRITICAL_COMBAT_EVENTS = new Set([
+  'tower_shot',
+  'mint_splash',
+  'popcorn_boom',
+  'shield_hit',
+  'shield_break',
+  'creep_pop',
+  'frost_nova',
+  'brittle_shatter',
+  'healer_pulse',
+  'execute_hit',
+  'macaron_cracked'
+]);
+const NON_CRITICAL_EVENT_CAP = 24;
+const WS_BACKPRESSURE_BYTES = 65536; // 64 KB
+
 function sanitizeNickname(raw, fallback) {
   if (typeof raw !== 'string') return fallback;
   const cleaned = raw
@@ -121,24 +137,80 @@ export class RoomManager {
     }
   }
 
-  _broadcastSnapshot(room, events = []) {
+  _filterEventsForPlayer(events, playerSlot, watchedSlot, { criticalOnly = false } = {}) {
+    if (!events || events.length === 0) return [];
+    const out = [];
+    const seenNonLemonShots = new Set();
+    let nonCriticalCount = 0;
+
+    for (const ev of events) {
+      if (ev.viewerScope !== 'all' && ev.viewerScope !== playerSlot) continue;
+
+      if (NON_CRITICAL_COMBAT_EVENTS.has(ev.type)) {
+        if (criticalOnly) continue;
+        if (ev.slot !== watchedSlot) continue;
+        if (ev.type === 'tower_shot' && ev.towerType !== 'lemon') {
+          const dedupKey = `${ev.slot}:${ev.towerType}`;
+          if (seenNonLemonShots.has(dedupKey)) continue;
+          seenNonLemonShots.add(dedupKey);
+        }
+        if (nonCriticalCount >= NON_CRITICAL_EVENT_CAP) continue;
+        nonCriticalCount += 1;
+      }
+
+      const { viewerScope, ...rest } = ev;
+      out.push(rest);
+    }
+    return out;
+  }
+
+  _sendSnapshotToPlayer(room, player, events = [], { isPeriodic = false, forceFullOpponent = false } = {}) {
+    if (!room.sim || !player || !player.ws || player.isAI || player.ws.readyState !== 1) return;
+    const watchedSlot = player.viewMode === 'opponent' ? 1 - player.slot : player.slot;
+
+    if (isPeriodic && room.phase === 'PLAYING' && (player.ws.bufferedAmount || 0) > WS_BACKPRESSURE_BYTES) {
+      player.skippedSnapshots = (player.skippedSnapshots || 0) + 1;
+      const criticalEvents = this._filterEventsForPlayer(events, player.slot, watchedSlot, {
+        criticalOnly: true
+      });
+      if (criticalEvents.length > 0) {
+        this._send(player.ws, {
+          type: 'game_event',
+          tick: room.sim.tick,
+          events: criticalEvents
+        });
+      }
+      return;
+    }
+
+    const opponentLite =
+      !forceFullOpponent &&
+      isPeriodic &&
+      player.viewMode !== 'opponent' &&
+      room.phase === 'PLAYING' &&
+      room.sim.tick % 10 !== 0;
+
+    const snap = room.sim.getClientSnapshot(player.slot, room.phase, { opponentLite });
+    snap.skippedSnapshots = player.skippedSnapshots || 0;
+    this._send(player.ws, snap);
+
+    const filteredEvents = this._filterEventsForPlayer(events, player.slot, watchedSlot, {
+      criticalOnly: false
+    });
+    if (filteredEvents.length > 0) {
+      this._send(player.ws, {
+        type: 'game_event',
+        tick: room.sim.tick,
+        events: filteredEvents
+      });
+    }
+  }
+
+  _broadcastSnapshot(room, events = [], { isPeriodic = false } = {}) {
     if (!room.sim) return;
     for (const p of room.players) {
       if (!p || !p.ws || p.isAI) continue;
-      const snap = room.sim.getClientSnapshot(p.slot, room.phase);
-      this._send(p.ws, snap);
-      if (events.length > 0) {
-        const scoped = events.filter(
-          (ev) => ev.viewerScope === 'all' || ev.viewerScope === p.slot
-        );
-        if (scoped.length > 0) {
-          this._send(p.ws, {
-            type: 'game_event',
-            tick: room.sim.tick,
-            events: scoped.map(({ viewerScope, ...rest }) => rest)
-          });
-        }
-      }
+      this._sendSnapshotToPlayer(room, p, events, { isPeriodic });
     }
   }
 
@@ -158,7 +230,11 @@ export class RoomManager {
     room.sim = new GameSimulation({ mapId: room.resolvedMapId });
     room.aiBot = room.mode === 'ai' ? new CandyAIBot(room.aiDifficulty, room.resolvedMapId) : null;
     for (const p of room.players) {
-      if (p) p.rematchReady = false;
+      if (p) {
+        p.rematchReady = false;
+        p.viewMode = 'self';
+        p.skippedSnapshots = 0;
+      }
     }
     this._broadcastRoomState(room);
     this._broadcastSnapshot(room, []);
@@ -283,7 +359,7 @@ export class RoomManager {
           this._broadcastRoomState(room);
         }
         room.lastTickDurationMs = Number((performance.now() - t0).toFixed(2));
-        this._broadcastSnapshot(room, events);
+        this._broadcastSnapshot(room, events, { isPeriodic: room.phase === 'PLAYING' });
       }
     }
   }
@@ -322,6 +398,9 @@ export class RoomManager {
       case 'player_ready':
         this._handlePlayerReady(ws, msg);
         break;
+      case 'set_view_mode':
+        this._handleSetViewMode(ws, msg);
+        break;
       case 'place_tower':
       case 'upgrade_tower':
       case 'sell_tower':
@@ -344,12 +423,35 @@ export class RoomManager {
   _handlePing(ws, msg) {
     const session = this.wsToSession.get(ws);
     const room = session ? this.rooms.get(session.roomCode) : null;
+    const player = room && session ? room.players[session.slot] : null;
     this._send(ws, {
       type: 'pong',
       clientTime: msg.clientTime || Date.now(),
       serverTime: Date.now(),
-      serverTickMs: room ? room.lastTickDurationMs || 0 : 0
+      serverTickMs: room ? room.lastTickDurationMs || 0 : 0,
+      skippedSnapshots: player ? player.skippedSnapshots || 0 : 0
     });
+  }
+
+  _handleSetViewMode(ws, msg) {
+    const session = this.wsToSession.get(ws);
+    if (!session) return;
+    const room = this.rooms.get(session.roomCode);
+    if (!room) return;
+    const player = room.players[session.slot];
+    if (!player) return;
+
+    if (msg.mode !== 'self' && msg.mode !== 'opponent') {
+      this._sendError(ws, 'INVALID_VIEW_MODE', '无效视角模式');
+      return;
+    }
+    player.viewMode = msg.mode;
+    if (msg.mode === 'opponent' && room.sim && room.phase === 'PLAYING') {
+      this._sendSnapshotToPlayer(room, player, [], {
+        isPeriodic: false,
+        forceFullOpponent: true
+      });
+    }
   }
 
   _detachCurrentSocket(ws) {
@@ -467,6 +569,8 @@ export class RoomManager {
       connected: true,
       isAI: false,
       rematchReady: false,
+      viewMode: 'self',
+      skippedSnapshots: 0,
       ws
     };
 
@@ -481,6 +585,8 @@ export class RoomManager {
             connected: true,
             isAI: true,
             rematchReady: true,
+            viewMode: 'self',
+            skippedSnapshots: 0,
             ws: null
           }
         : null;
@@ -560,6 +666,7 @@ export class RoomManager {
         }
         matchPlayer.ws = ws;
         matchPlayer.connected = true;
+        matchPlayer.viewMode = 'self';
         this.wsToSession.set(ws, { roomCode: room.code, slot: matchPlayer.slot });
 
         if (room.phase === 'PAUSED_RECONNECT') {
@@ -611,6 +718,8 @@ export class RoomManager {
       connected: true,
       isAI: false,
       rematchReady: false,
+      viewMode: 'self',
+      skippedSnapshots: 0,
       ws
     };
     this.wsToSession.set(ws, { roomCode: room.code, slot: openSlot });
